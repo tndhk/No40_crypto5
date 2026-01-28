@@ -3,10 +3,8 @@
 
 Freqtrade戦略で使用するテクニカル指標を計算する関数群
 """
-import pandas as pd
-import numpy as np
-from pandas import DataFrame
 import talib.abstract as ta
+from pandas import DataFrame
 
 
 def calculate_ema(dataframe: DataFrame, period: int) -> DataFrame:

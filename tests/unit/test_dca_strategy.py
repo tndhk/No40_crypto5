@@ -2,10 +2,12 @@
 DCA戦略のユニットテスト
 """
 
-import pytest
-import pandas as pd
 from datetime import datetime
 from unittest.mock import MagicMock
+
+import pandas as pd
+import pytest
+
 from user_data.strategies.dca_strategy import DCAStrategy
 
 

@@ -1,14 +1,13 @@
 """
 テクニカル指標のユニットテスト
 """
-import pytest
 import pandas as pd
-import numpy as np
+
 from user_data.strategies.indicators import (
+    calculate_bollinger_bands,
     calculate_ema,
     calculate_rsi,
-    calculate_bollinger_bands,
-    calculate_volume_sma
+    calculate_volume_sma,
 )
 
 

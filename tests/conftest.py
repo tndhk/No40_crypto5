@@ -1,12 +1,11 @@
 """
 Pytestの共通フィクスチャ定義
 """
+from unittest.mock import MagicMock
+
 import pytest
-from freqtrade.configuration import Configuration
-from freqtrade.data.dataprovider import DataProvider
 from freqtrade.exchange import Exchange
 from freqtrade.persistence import Trade
-from unittest.mock import MagicMock
 
 
 @pytest.fixture

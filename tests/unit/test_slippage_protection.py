@@ -2,7 +2,6 @@
 スリッページ保護モジュールのユニットテスト
 """
 
-import pytest
 from user_data.strategies.slippage_protection import SlippageProtection
 
 

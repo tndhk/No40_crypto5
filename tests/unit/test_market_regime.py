@@ -2,9 +2,8 @@
 市場環境判定モジュールのユニットテスト
 """
 
-import pytest
 import pandas as pd
-from pandas import DataFrame
+
 from user_data.strategies.market_regime import MarketRegime
 
 

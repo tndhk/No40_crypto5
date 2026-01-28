@@ -6,11 +6,12 @@ EMA50/200とADXを使用してトレンドを判定し、
 """
 
 from typing import Literal
-import pandas as pd
-from pandas import DataFrame
-import talib.abstract as ta
-from user_data.strategies.indicators import calculate_ema
 
+import pandas as pd
+import talib.abstract as ta
+from pandas import DataFrame
+
+from user_data.strategies.indicators import calculate_ema
 
 MarketRegimeType = Literal['bullish', 'bearish', 'sideways']
 

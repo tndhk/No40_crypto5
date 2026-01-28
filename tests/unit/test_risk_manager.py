@@ -2,8 +2,8 @@
 リスク管理モジュールのユニットテスト
 """
 
-import pytest
 from datetime import datetime, timedelta
+
 from user_data.strategies.risk_manager import RiskManager
 
 
