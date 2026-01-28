@@ -20,7 +20,7 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "--cov=user_data/strategies --cov-report=html --cov-report=term-missing"
+addopts = "--cov=user_data/strategies --cov=scripts --cov-report=html --cov-report=term-missing"
 
 [tool.ruff]
 line-length = 100

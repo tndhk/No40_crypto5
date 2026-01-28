@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# データダウンロードスクリプト
+# BTC/JPY, ETH/JPYの履歴データを取得
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
+log "Starting data download..."
+
+# ペアのリスト
+PAIRS=("BTC/JPY" "ETH/JPY")
+
+# 時間足のリスト
+TIMEFRAMES=("1h" "4h" "1d")
+
+# 開始日（YYYYMMDD形式）
+START_DATE="20240301"
+
+# 現在日を取得
+END_DATE=$(date '+%Y%m%d')
+
+cd "$PROJECT_ROOT"
+
+for PAIR in "${PAIRS[@]}"; do
+    for TIMEFRAME in "${TIMEFRAMES[@]}"; do
+        log "Downloading $PAIR $TIMEFRAME data from $START_DATE to $END_DATE"
+
+        freqtrade download-data \
+            --exchange binance \
+            --pairs "$PAIR" \
+            --timeframes "$TIMEFRAME" \
+            --timerange "${START_DATE}-${END_DATE}" \
+            --config user_data/config/config.json \
+            --datadir user_data/data/binance || {
+                log "ERROR: Failed to download $PAIR $TIMEFRAME"
+                continue
+            }
+
+        log "Successfully downloaded $PAIR $TIMEFRAME"
+    done
+done
+
+log "Data download completed"

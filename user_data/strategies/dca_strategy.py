@@ -14,6 +14,7 @@ from pandas import DataFrame
 
 from user_data.strategies.indicators import calculate_rsi
 from user_data.strategies.market_regime import MarketRegime
+from user_data.strategies.risk_manager import RiskManager
 from user_data.strategies.slippage_protection import SlippageProtection
 
 
@@ -73,7 +74,22 @@ class DCAStrategy(IStrategy):
         self.market_regime = MarketRegime(adx_threshold=25.0)
 
         # スリッページ保護モジュール
-        self.slippage_protection = SlippageProtection(max_slippage_percent=0.5)
+        self.slippage_protection = SlippageProtection(
+            max_slippage_percent=config.get('max_slippage_percent', 0.5)
+        )
+
+        # リスク管理モジュール
+        self.risk_manager = RiskManager(
+            max_position_size=config.get('max_position_size', 100000),
+            max_portfolio_allocation=config.get('max_portfolio_allocation', 0.2),
+            daily_loss_limit=config.get('daily_loss_limit', 0.05),
+            circuit_breaker_drawdown=config.get('circuit_breaker_drawdown', 0.15),
+            max_consecutive_losses=config.get('max_consecutive_losses', 3),
+            cooldown_hours=config.get('cooldown_hours', 24)
+        )
+
+        # 期待エントリー価格の記録用
+        self.expected_entry_price = {}
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
@@ -121,6 +137,11 @@ class DCAStrategy(IStrategy):
             'enter_long'
         ] = 1
 
+        # 期待エントリー価格を記録（最新のクローズ価格）
+        if len(dataframe) > 0:
+            pair = metadata.get('pair', '')
+            self.expected_entry_price[pair] = dataframe['close'].iloc[-1]
+
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -156,7 +177,7 @@ class DCAStrategy(IStrategy):
         entry_tag: Optional[str],
         side: str,
         **kwargs
-    ) -> float:
+    ) -> Optional[float]:
         """
         カスタムステーク額を計算
 
@@ -173,14 +194,19 @@ class DCAStrategy(IStrategy):
             **kwargs: その他のパラメータ
 
         Returns:
-            カスタムステーク額
+            カスタムステーク額（上限超過の場合None）
         """
         # DCAエントリーの場合は1.5倍のステーク
+        stake_amount = proposed_stake
         if entry_tag and entry_tag.startswith('dca_'):
-            return proposed_stake * 1.5
+            stake_amount = proposed_stake * 1.5
+
+        # ポジションサイズ上限チェック
+        if not self.risk_manager.check_position_size(stake_amount):
+            return None
 
         # 初回エントリーは提案額をそのまま使用
-        return proposed_stake
+        return stake_amount
 
     def adjust_trade_position(
         self,
@@ -220,6 +246,17 @@ class DCAStrategy(IStrategy):
         if not trade:
             return None
 
+        # クールダウン期間中はDCAをブロック
+        if not self.risk_manager.check_cooldown(current_time):
+            return None
+
+        # 部分利確チェック（利益が閾値を超えた場合）
+        if current_profit >= self.take_profit_threshold.value:
+            # 負の値を返すことで部分売却を指示
+            # stake_amount * sell_ratioを売却
+            sell_amount = trade.stake_amount * self.take_profit_sell_ratio.value
+            return -sell_amount
+
         # 利益が出ている場合はDCAなし
         if current_profit > 0:
             return None
@@ -240,3 +277,40 @@ class DCAStrategy(IStrategy):
             return max_stake * 0.5
 
         return None
+
+    def confirm_trade_entry(
+        self,
+        pair: str,
+        order_type: str,
+        amount: float,
+        rate: float,
+        time_in_force: str,
+        current_time: datetime,
+        entry_tag: Optional[str],
+        side: str,
+        **kwargs
+    ) -> bool:
+        """
+        エントリー注文の最終確認
+
+        Args:
+            pair: 通貨ペア
+            order_type: 注文タイプ
+            amount: 注文量
+            rate: 注文レート
+            time_in_force: 注文有効期限
+            current_time: 現在時刻
+            entry_tag: エントリータグ
+            side: 'long' or 'short'
+            **kwargs: その他のパラメータ
+
+        Returns:
+            True: 注文許可, False: 注文拒否
+        """
+        # 期待価格が記録されている場合のみスリッページチェック
+        if pair in self.expected_entry_price:
+            expected_price = self.expected_entry_price[pair]
+            if not self.slippage_protection.check_slippage(expected_price, rate):
+                return False
+
+        return True
