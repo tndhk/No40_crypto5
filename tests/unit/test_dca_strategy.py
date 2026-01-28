@@ -336,6 +336,11 @@ class TestDCAStrategyBasicConfiguration:
         strategy = DCAStrategy(default_config)
         assert strategy.stoploss == -0.20
 
+    def test_timeframe_is_one_hour(self, default_config):
+        """timeframe値が'1h'であることを確認"""
+        strategy = DCAStrategy(default_config)
+        assert strategy.timeframe == '1h'
+
 
 class TestDCAStrategyPartialTakeProfit:
     """部分利確のテストスイート"""

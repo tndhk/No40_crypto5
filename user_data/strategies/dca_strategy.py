@@ -31,7 +31,7 @@ class DCAStrategy(IStrategy):
     can_short = False
 
     # 基本設定
-    timeframe = '5m'
+    timeframe = '1h'
     stoploss = -0.20  # -20%
     minimal_roi = {
         "0": 0.15,    # 15%
