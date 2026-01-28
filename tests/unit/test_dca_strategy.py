@@ -328,6 +328,15 @@ class TestDCAStrategySlippageProtection:
         assert result is True
 
 
+class TestDCAStrategyBasicConfiguration:
+    """基本設定のテストスイート"""
+
+    def test_stoploss_is_minus_twenty_percent(self, default_config):
+        """stoploss値が-0.20であることを確認"""
+        strategy = DCAStrategy(default_config)
+        assert strategy.stoploss == -0.20
+
+
 class TestDCAStrategyPartialTakeProfit:
     """部分利確のテストスイート"""
 
