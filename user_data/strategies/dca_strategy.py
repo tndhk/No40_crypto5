@@ -67,6 +67,24 @@ class DCAStrategy(IStrategy):
     position_adjustment_enable = True
     max_entry_position_adjustment = 3  # 最大3回のDCA
 
+    @property
+    def protections(self):
+        """
+        Freqtrade protections設定
+
+        Returns:
+            protectionsの設定リスト
+        """
+        return [
+            {"method": "CooldownPeriod", "stop_duration_candles": 3},
+            {"method": "MaxDrawdown", "lookback_period_candles": 48,
+             "trade_limit": 20, "max_allowed_drawdown": 0.15},
+            {"method": "StoplossGuard", "lookback_period_candles": 24,
+             "trade_limit": 3, "only_per_pair": False},
+            {"method": "LowProfitPairs", "lookback_period_candles": 48,
+             "trade_limit": 2, "required_profit": -0.05},
+        ]
+
     def __init__(self, config: dict) -> None:
         """
         戦略の初期化

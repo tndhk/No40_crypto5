@@ -409,3 +409,31 @@ class TestDCAStrategyPartialTakeProfit:
 
         # 閾値未満のためNone
         assert result is None
+
+
+class TestDCAStrategyProtections:
+    """Freqtrade protectionsのテストスイート"""
+
+    def test_protections_includes_cooldown_period(self, default_config):
+        """CooldownPeriodが含まれることを確認"""
+        strategy = DCAStrategy(default_config)
+        methods = [p["method"] for p in strategy.protections]
+        assert "CooldownPeriod" in methods
+
+    def test_protections_includes_max_drawdown(self, default_config):
+        """MaxDrawdownが含まれることを確認"""
+        strategy = DCAStrategy(default_config)
+        methods = [p["method"] for p in strategy.protections]
+        assert "MaxDrawdown" in methods
+
+    def test_protections_includes_stoploss_guard(self, default_config):
+        """StoplossGuardが含まれることを確認"""
+        strategy = DCAStrategy(default_config)
+        methods = [p["method"] for p in strategy.protections]
+        assert "StoplossGuard" in methods
+
+    def test_protections_includes_low_profit_pairs(self, default_config):
+        """LowProfitPairsが含まれることを確認"""
+        strategy = DCAStrategy(default_config)
+        methods = [p["method"] for p in strategy.protections]
+        assert "LowProfitPairs" in methods
