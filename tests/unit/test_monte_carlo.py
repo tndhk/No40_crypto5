@@ -63,31 +63,39 @@ class TestMonteCarloSimulation:
     def test_simulation_shuffles_trade_order(self):
         """各runでトレード順序がシャッフルされる"""
         # 順序依存の結果になるようなトレード系列
-        # 最初に大きな利益があると累積利益が高くなる
-        trade_results = (100.0, -10.0, -10.0, -10.0, -10.0)
+        # より多くのトレードでドローダウンの分散を確保
+        trade_results = (100.0, -10.0, -10.0, -10.0, -10.0, 50.0, -15.0, -5.0, 30.0, -8.0)
 
         # 同じseedで実行すると同じ結果になることを確認
         result1 = run_monte_carlo(
-            trade_results=trade_results, num_simulations=50, seed=42
+            trade_results=trade_results, num_simulations=100, seed=42
         )
         result2 = run_monte_carlo(
-            trade_results=trade_results, num_simulations=50, seed=42
+            trade_results=trade_results, num_simulations=100, seed=42
         )
 
         assert result1.median_profit == result2.median_profit
         assert result1.ci_95_lower == result2.ci_95_lower
         assert result1.ci_95_upper == result2.ci_95_upper
+        assert result1.median_drawdown == result2.median_drawdown
+        assert result1.worst_drawdown == result2.worst_drawdown
+        assert result1.best_drawdown == result2.best_drawdown
 
-        # 異なるseedで実行すると異なる結果になることを確認
+        # 異なるseedで実行すると異なるドローダウン結果になることを確認
+        # Permutationでは最終利益は常に同じだが、ドローダウンは異なる
         result3 = run_monte_carlo(
-            trade_results=trade_results, num_simulations=50, seed=123
+            trade_results=trade_results, num_simulations=100, seed=123
         )
 
-        # 確率的に同一になる可能性は極めて低い
+        # 最終利益は同じはず（permutationなので）
+        assert result1.median_profit == result3.median_profit
+
+        # ドローダウンは異なるはず（順序依存なので）
+        # より多くのトレードとシミュレーションで少なくとも1つは異なる
         assert (
-            result1.median_profit != result3.median_profit
-            or result1.ci_95_lower != result3.ci_95_lower
-            or result1.ci_95_upper != result3.ci_95_upper
+            result1.best_drawdown != result3.best_drawdown
+            or result1.median_drawdown != result3.median_drawdown
+            or result1.worst_drawdown != result3.worst_drawdown
         )
 
     def test_confidence_interval_calculation(self):
@@ -100,9 +108,10 @@ class TestMonteCarloSimulation:
             trade_results=trade_results, num_simulations=num_simulations, seed=42
         )
 
-        # 信頼区間の妥当性チェック
-        assert result.ci_95_lower < result.median_profit
-        assert result.median_profit < result.ci_95_upper
+        # Permutationでは最終利益は常に同じなので、CI幅はゼロ
+        # 信頼区間の下限、中央値、上限は全て同じ値になる
+        assert result.ci_95_lower == result.median_profit
+        assert result.median_profit == result.ci_95_upper
 
         # 中央値は全トレードの合計と同じはず（順序を変えても合計は同じ）
         expected_total = sum(trade_results)
@@ -290,9 +299,13 @@ class TestMonteCarloEdgeCases:
         # ドローダウンは発生するはず
         assert result.worst_drawdown > 0.0
 
-        # 信頼区間の幅は正の値
-        ci_width = result.ci_95_upper - result.ci_95_lower
-        assert ci_width > 0.0
+        # Permutationでは利益のCI幅はゼロ（常に同じ最終利益）
+        profit_ci_width = result.ci_95_upper - result.ci_95_lower
+        assert abs(profit_ci_width) < 0.01
+
+        # ドローダウンのCI幅は正の値になるはず（順序依存）
+        dd_range = result.worst_drawdown - result.best_drawdown
+        assert dd_range > 0.0
 
 
 class TestMonteCarloStatisticalProperties:
@@ -308,8 +321,8 @@ class TestMonteCarloStatisticalProperties:
 
         assert result.ci_95_lower <= result.median_profit <= result.ci_95_upper
 
-    def test_larger_sample_size_narrows_confidence_interval(self):
-        """サンプルサイズが大きいほど信頼区間が狭くなる傾向"""
+    def test_larger_sample_size_improves_drawdown_statistics(self):
+        """サンプルサイズが大きいほどドローダウン統計の精度が向上"""
         trade_results = (10.0, -5.0, 15.0, -3.0, 20.0, 8.0, -2.0)
 
         result_small = run_monte_carlo(
@@ -319,13 +332,20 @@ class TestMonteCarloStatisticalProperties:
             trade_results=trade_results, num_simulations=1000, seed=42
         )
 
+        # Permutationでは利益のCI幅は常にゼロ
         ci_width_small = result_small.ci_95_upper - result_small.ci_95_lower
         ci_width_large = result_large.ci_95_upper - result_large.ci_95_lower
 
-        # 大きいサンプルサイズの方が信頼区間が狭い傾向
-        # （確率的にそうなるはずだが、100%保証ではない）
-        # ここでは傾向の確認のみ（厳密な不等式ではない）
-        assert ci_width_large <= ci_width_small * 1.5
+        assert abs(ci_width_small) < 0.01
+        assert abs(ci_width_large) < 0.01
+
+        # サンプルサイズが大きい方がドローダウンの範囲が広くなる傾向
+        # （より多くのシャッフルパターンを探索するため）
+        dd_range_small = result_small.worst_drawdown - result_small.best_drawdown
+        dd_range_large = result_large.worst_drawdown - result_large.best_drawdown
+
+        # 大きいサンプルサイズの方が極端なケースを捕捉しやすい
+        assert dd_range_large >= dd_range_small
 
     def test_variance_in_trade_sequence_affects_drawdown_distribution(self):
         """トレード順序の分散がドローダウン分布に影響"""
