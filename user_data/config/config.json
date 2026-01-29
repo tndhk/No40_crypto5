@@ -1,5 +1,5 @@
 {
-  "max_open_trades": 2,
+  "max_open_trades": 6,
   "stake_currency": "JPY",
   "stake_amount": 10000,
   "dry_run": true,

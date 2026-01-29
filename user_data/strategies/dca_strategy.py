@@ -31,13 +31,13 @@ class DCAStrategy(IStrategy):
     can_short = False
 
     # 基本設定
-    timeframe = '1h'
+    timeframe = '15m'
     stoploss = -0.20  # -20%
-    # minimal_roi: 1h足基準（暫定値、Hyperoptで最適化予定）
+    # minimal_roi: 15m足基準（暫定値、Hyperoptで最適化予定）
     minimal_roi = {
         "0": 0.15,      # 即座: 15%
-        "720": 0.10,    # 12時間後（12本後）: 10%
-        "1440": 0.05,   # 24時間後（24本後）: 5%
+        "180": 0.10,    # 180本後（45時間 = 12時間 × 48本/12h = 12時間）: 10%
+        "360": 0.05,    # 360本後（90時間 = 24時間 × 48本/24h = 24時間）: 5%
     }
 
     # トレーリングストップ設定

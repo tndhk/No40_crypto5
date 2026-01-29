@@ -17,7 +17,7 @@ log "Starting data download..."
 PAIRS=("BTC/JPY" "ETH/JPY")
 
 # 時間足のリスト
-TIMEFRAMES=("1h" "4h" "1d")
+TIMEFRAMES=("15m" "1h" "4h" "1d")
 
 # 開始日（YYYYMMDD形式）
 START_DATE="20240301"
@@ -27,11 +27,14 @@ END_DATE=$(date '+%Y%m%d')
 
 cd "$PROJECT_ROOT"
 
+# 仮想環境のfreqtradeコマンドを使用
+FREQTRADE_CMD="$PROJECT_ROOT/.venv/bin/freqtrade"
+
 for PAIR in "${PAIRS[@]}"; do
     for TIMEFRAME in "${TIMEFRAMES[@]}"; do
         log "Downloading $PAIR $TIMEFRAME data from $START_DATE to $END_DATE"
 
-        freqtrade download-data \
+        "$FREQTRADE_CMD" download-data \
             --exchange binance \
             --pairs "$PAIR" \
             --timeframes "$TIMEFRAME" \

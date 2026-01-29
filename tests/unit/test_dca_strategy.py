@@ -481,9 +481,9 @@ class TestDCAStrategyBasicConfiguration:
         assert strategy.stoploss == -0.20
 
     def test_timeframe_is_one_hour(self, default_config):
-        """timeframe値が'1h'であることを確認"""
+        """timeframe値が'15m'であることを確認"""
         strategy = DCAStrategy(default_config)
-        assert strategy.timeframe == '1h'
+        assert strategy.timeframe == '15m'
 
     def test_trailing_stop_configuration(self, default_config):
         """trailing_stop関連の設定値を確認"""
