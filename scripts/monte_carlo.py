@@ -198,16 +198,23 @@ def main() -> None:
         print(f"Error reading file {backtest_file}: {e}")
         sys.exit(1)
 
-    # トレードリストを抽出
+    # トレードリストを抽出（新旧フォーマット両対応）
     trades = backtest_data.get("trades", [])
+
+    # 新しいフォーマット（strategy.DCAStrategy.trades）の確認
+    if not trades and "strategy" in backtest_data:
+        for strategy_name, strategy_data in backtest_data["strategy"].items():
+            if "trades" in strategy_data and strategy_data["trades"]:
+                trades = strategy_data["trades"]
+                break
 
     if not trades:
         print("Error: No trades found in backtest result")
         sys.exit(1)
 
-    # 各トレードの損益を抽出
+    # 各トレードの損益を抽出（profit_absを使用）
     trade_results = tuple(
-        float(trade.get("profit", 0.0)) for trade in trades
+        float(trade.get("profit_abs", 0.0)) for trade in trades
     )
 
     if len(trade_results) == 0:
@@ -229,10 +236,10 @@ def main() -> None:
     print("\n=== Monte Carlo Simulation Results ===")
     print(f"Number of trades: {len(trade_results)}")
     print(f"Number of simulations: {result.run_count}")
-    print(f"\nProfit Statistics:")
+    print("\nProfit Statistics:")
     print(f"  Median profit: ${result.median_profit:.2f}")
     print(f"  95% CI: [${result.ci_95_lower:.2f}, ${result.ci_95_upper:.2f}]")
-    print(f"\nDrawdown Statistics:")
+    print("\nDrawdown Statistics:")
     print(f"  Best case DD: ${result.best_drawdown:.2f}")
     print(f"  Median DD: ${result.median_drawdown:.2f}")
     print(f"  Worst case DD: ${result.worst_drawdown:.2f}")

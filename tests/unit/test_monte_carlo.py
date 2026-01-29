@@ -13,10 +13,10 @@ Monte Carlo Simulation Tests (RED Phase)
 import json
 import sys
 import tempfile
-from io import StringIO
 from pathlib import Path
 
 import pytest
+
 from scripts.monte_carlo import MonteCarloResult, main, run_monte_carlo
 
 

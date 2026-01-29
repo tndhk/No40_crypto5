@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
+
 from scripts.analyze_backtest import (
     BacktestMetrics,
     CriteriaResult,

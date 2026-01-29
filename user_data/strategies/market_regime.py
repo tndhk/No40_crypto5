@@ -11,7 +11,7 @@ import pandas as pd
 import talib.abstract as ta
 from pandas import DataFrame
 
-from indicators import calculate_ema
+from .indicators import calculate_ema
 
 MarketRegimeType = Literal['bullish', 'bearish', 'sideways']
 
