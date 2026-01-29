@@ -10,8 +10,14 @@ Monte Carlo Simulation Tests (RED Phase)
 - 純粋関数アプローチ
 """
 
+import json
+import sys
+import tempfile
+from io import StringIO
+from pathlib import Path
+
 import pytest
-from scripts.monte_carlo import MonteCarloResult, run_monte_carlo
+from scripts.monte_carlo import MonteCarloResult, main, run_monte_carlo
 
 
 class TestMonteCarloResult:
@@ -359,3 +365,143 @@ class TestMonteCarloStatisticalProperties:
         # ワーストとベストのドローダウンの差が大きいはず
         dd_range = result.worst_drawdown - result.best_drawdown
         assert dd_range > 0.0
+
+
+class TestMonteCarloMain:
+    """Monte Carlo CLIメイン関数のテストスイート"""
+
+    def test_main_with_valid_json(self, monkeypatch, capsys):
+        """正常なバックテストJSONでメイン関数を実行"""
+        backtest_data = {
+            "trades": [
+                {"profit": 10.0},
+                {"profit": -5.0},
+                {"profit": 15.0},
+                {"profit": -3.0},
+                {"profit": 20.0},
+            ]
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(backtest_data, f)
+            temp_path = f.name
+
+        try:
+            monkeypatch.setattr(sys, "argv", ["monte_carlo.py", temp_path])
+            main()
+
+            captured = capsys.readouterr()
+            assert "Monte Carlo Simulation Results" in captured.out
+            assert "Number of trades: 5" in captured.out
+            assert "Median profit:" in captured.out
+        finally:
+            Path(temp_path).unlink()
+
+    def test_main_with_file_not_found(self, monkeypatch, capsys):
+        """ファイルが存在しない場合はエラー終了"""
+        monkeypatch.setattr(sys, "argv", ["monte_carlo.py", "/nonexistent/path/backtest.json"])
+
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+
+        assert excinfo.value.code == 1
+        captured = capsys.readouterr()
+        assert "Error: File not found" in captured.out
+
+    def test_main_with_invalid_json(self, monkeypatch, capsys):
+        """不正なJSON形式の場合はエラー終了"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write("{invalid json")
+            temp_path = f.name
+
+        try:
+            monkeypatch.setattr(sys, "argv", ["monte_carlo.py", temp_path])
+
+            with pytest.raises(SystemExit) as excinfo:
+                main()
+
+            assert excinfo.value.code == 1
+            captured = capsys.readouterr()
+            assert "Error: Invalid JSON" in captured.out
+        finally:
+            Path(temp_path).unlink()
+
+    def test_main_with_custom_runs(self, monkeypatch, capsys):
+        """カスタムシミュレーション回数でメイン関数を実行"""
+        backtest_data = {
+            "trades": [
+                {"profit": 10.0},
+                {"profit": -5.0},
+                {"profit": 15.0},
+            ]
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(backtest_data, f)
+            temp_path = f.name
+
+        try:
+            monkeypatch.setattr(
+                sys,
+                "argv",
+                ["monte_carlo.py", temp_path, "--simulations", "50", "--seed", "123"],
+            )
+            main()
+
+            captured = capsys.readouterr()
+            assert "Number of simulations: 50" in captured.out
+        finally:
+            Path(temp_path).unlink()
+
+    def test_main_with_no_arguments(self, monkeypatch, capsys):
+        """引数なしで実行すると使い方を表示して終了"""
+        monkeypatch.setattr(sys, "argv", ["monte_carlo.py"])
+
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+
+        assert excinfo.value.code == 1
+        captured = capsys.readouterr()
+        assert "Usage:" in captured.out
+
+    def test_main_with_empty_trades(self, monkeypatch, capsys):
+        """トレードが空の場合はエラー終了"""
+        backtest_data = {"trades": []}
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(backtest_data, f)
+            temp_path = f.name
+
+        try:
+            monkeypatch.setattr(sys, "argv", ["monte_carlo.py", temp_path])
+
+            with pytest.raises(SystemExit) as excinfo:
+                main()
+
+            assert excinfo.value.code == 1
+            captured = capsys.readouterr()
+            assert "Error: No trades found" in captured.out
+        finally:
+            Path(temp_path).unlink()
+
+    def test_main_with_unknown_argument(self, monkeypatch, capsys):
+        """不明な引数の場合はエラー終了"""
+        backtest_data = {"trades": [{"profit": 10.0}]}
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(backtest_data, f)
+            temp_path = f.name
+
+        try:
+            monkeypatch.setattr(
+                sys, "argv", ["monte_carlo.py", temp_path, "--unknown", "value"]
+            )
+
+            with pytest.raises(SystemExit) as excinfo:
+                main()
+
+            assert excinfo.value.code == 1
+            captured = capsys.readouterr()
+            assert "Unknown argument" in captured.out
+        finally:
+            Path(temp_path).unlink()

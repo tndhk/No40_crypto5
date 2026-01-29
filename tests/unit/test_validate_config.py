@@ -3,12 +3,18 @@
 """
 
 import json
+import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 
-from scripts.validate_config import ValidationResult, load_and_validate_config, validate_config
+from scripts.validate_config import (
+    ValidationResult,
+    load_and_validate_config,
+    main,
+    validate_config,
+)
 
 
 class TestValidationResult:
@@ -171,5 +177,116 @@ class TestLoadAndValidateConfig:
 
             assert result.is_valid is True
             assert len(result.errors) == 0
+        finally:
+            Path(temp_path).unlink()
+
+
+class TestValidateConfigMain:
+    """Validate Config CLIメイン関数のテストスイート"""
+
+    def test_main_with_valid_config(self, monkeypatch, capsys):
+        """正常な設定ファイルで成功（終了コード0）"""
+        config = {
+            "max_open_trades": 2,
+            "stake_currency": "JPY",
+            "stake_amount": 10000,
+            "dry_run": True,
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(config, f)
+            temp_path = f.name
+
+        try:
+            monkeypatch.setattr(sys, "argv", ["validate_config.py", temp_path])
+            exit_code = main()
+
+            assert exit_code == 0
+            captured = capsys.readouterr()
+            assert "is valid" in captured.out
+        finally:
+            Path(temp_path).unlink()
+
+    def test_main_with_invalid_config(self, monkeypatch, capsys):
+        """不正な設定ファイルで失敗（終了コード1）"""
+        config = {
+            "max_open_trades": 0,  # 不正な値
+            "stake_currency": "JPY",
+            "stake_amount": 10000,
+            "dry_run": True,
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(config, f)
+            temp_path = f.name
+
+        try:
+            monkeypatch.setattr(sys, "argv", ["validate_config.py", temp_path])
+            exit_code = main()
+
+            assert exit_code == 1
+            captured = capsys.readouterr()
+            assert "is invalid" in captured.err
+            assert "Validation errors:" in captured.err
+        finally:
+            Path(temp_path).unlink()
+
+    def test_main_with_file_not_found(self, monkeypatch, capsys):
+        """ファイルが存在しない場合は失敗（終了コード1）"""
+        monkeypatch.setattr(
+            sys, "argv", ["validate_config.py", "/nonexistent/path/config.json"]
+        )
+        exit_code = main()
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert "not found" in captured.err
+
+    def test_main_with_invalid_json(self, monkeypatch, capsys):
+        """不正なJSON形式の場合は失敗（終了コード1）"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write("{invalid json")
+            temp_path = f.name
+
+        try:
+            monkeypatch.setattr(sys, "argv", ["validate_config.py", temp_path])
+            exit_code = main()
+
+            assert exit_code == 1
+            captured = capsys.readouterr()
+            assert "json" in captured.err.lower()
+        finally:
+            Path(temp_path).unlink()
+
+    def test_main_with_no_arguments(self, monkeypatch, capsys):
+        """引数なしで実行すると使い方を表示して失敗（終了コード1）"""
+        monkeypatch.setattr(sys, "argv", ["validate_config.py"])
+        exit_code = main()
+
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert "Usage:" in captured.err
+
+    def test_main_with_warnings(self, monkeypatch, capsys):
+        """警告がある場合でも成功（終了コード0）だが警告を表示"""
+        config = {
+            "max_open_trades": 2,
+            "stake_currency": "JPY",
+            "stake_amount": 100000,  # 高額ステーク
+            "dry_run": False,  # ライブモード
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(config, f)
+            temp_path = f.name
+
+        try:
+            monkeypatch.setattr(sys, "argv", ["validate_config.py", temp_path])
+            exit_code = main()
+
+            assert exit_code == 0
+            captured = capsys.readouterr()
+            assert "Warnings:" in captured.out
+            assert "is valid" in captured.out
         finally:
             Path(temp_path).unlink()

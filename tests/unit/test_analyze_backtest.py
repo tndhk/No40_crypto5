@@ -8,6 +8,7 @@
 """
 
 import json
+import sys
 import tempfile
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from scripts.analyze_backtest import (
     BacktestMetrics,
     CriteriaResult,
     evaluate_backtest,
+    main,
     parse_backtest_json,
 )
 
@@ -343,5 +345,149 @@ class TestParseBacktestJson:
         try:
             with pytest.raises((TypeError, ValueError)):
                 parse_backtest_json(temp_path)
+        finally:
+            Path(temp_path).unlink()
+
+
+class TestAnalyzeBacktestMain:
+    """Analyze Backtest CLIメイン関数のテストスイート"""
+
+    def test_main_with_passing_results(self, monkeypatch, capsys):
+        """基準を満たすバックテスト結果で正常終了"""
+        backtest_data = {
+            "strategy": {
+                "DCATrendFollowStrategy": {
+                    "results_metrics": {
+                        "win_rate": 0.60,
+                        "profit_factor": 1.8,
+                        "sharpe": 1.0,
+                        "max_drawdown": 12.0,
+                        "trades": 100,
+                        "total_profit_pct": 20.0,
+                    }
+                }
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(backtest_data, f)
+            temp_path = f.name
+
+        try:
+            monkeypatch.setattr(sys, "argv", ["analyze_backtest.py", temp_path])
+            main()
+
+            captured = capsys.readouterr()
+            assert "Backtest Metrics" in captured.out
+            assert "Passed Minimum Criteria: True" in captured.out
+            assert "Passed Target Criteria: True" in captured.out
+        finally:
+            Path(temp_path).unlink()
+
+    def test_main_with_failing_results(self, monkeypatch, capsys):
+        """基準を満たさないバックテスト結果でエラー終了"""
+        backtest_data = {
+            "strategy": {
+                "DCATrendFollowStrategy": {
+                    "results_metrics": {
+                        "win_rate": 0.40,
+                        "profit_factor": 1.0,
+                        "sharpe": 0.3,
+                        "max_drawdown": 25.0,
+                        "trades": 20,
+                        "total_profit_pct": -5.0,
+                    }
+                }
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(backtest_data, f)
+            temp_path = f.name
+
+        try:
+            monkeypatch.setattr(sys, "argv", ["analyze_backtest.py", temp_path])
+
+            with pytest.raises(SystemExit) as excinfo:
+                main()
+
+            assert excinfo.value.code == 1
+            captured = capsys.readouterr()
+            assert "Passed Minimum Criteria: False" in captured.out
+        finally:
+            Path(temp_path).unlink()
+
+    def test_main_with_file_not_found(self, monkeypatch, capsys):
+        """ファイルが存在しない場合はエラー終了"""
+        monkeypatch.setattr(
+            sys, "argv", ["analyze_backtest.py", "/nonexistent/path/backtest.json"]
+        )
+
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+
+        assert excinfo.value.code == 1
+        captured = capsys.readouterr()
+        assert "Error:" in captured.err
+
+    def test_main_with_invalid_json(self, monkeypatch, capsys):
+        """不正なJSON形式の場合はエラー終了"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write("{invalid json")
+            temp_path = f.name
+
+        try:
+            monkeypatch.setattr(sys, "argv", ["analyze_backtest.py", temp_path])
+
+            with pytest.raises(SystemExit) as excinfo:
+                main()
+
+            assert excinfo.value.code == 1
+            captured = capsys.readouterr()
+            assert "Invalid JSON" in captured.err
+        finally:
+            Path(temp_path).unlink()
+
+    def test_main_with_no_arguments(self, monkeypatch, capsys):
+        """引数なしで実行すると使い方を表示して終了"""
+        monkeypatch.setattr(sys, "argv", ["analyze_backtest.py"])
+
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+
+        assert excinfo.value.code == 1
+        captured = capsys.readouterr()
+        assert "Usage:" in captured.out
+
+    def test_main_with_missing_field(self, monkeypatch, capsys):
+        """必須フィールドが欠落している場合はエラー終了"""
+        backtest_data = {
+            "strategy": {
+                "DCATrendFollowStrategy": {
+                    "results_metrics": {
+                        "win_rate": 0.55,
+                        # profit_factor欠落
+                        "sharpe": 0.8,
+                        "max_drawdown": 15.0,
+                        "trades": 50,
+                        "total_profit_pct": 10.5,
+                    }
+                }
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(backtest_data, f)
+            temp_path = f.name
+
+        try:
+            monkeypatch.setattr(sys, "argv", ["analyze_backtest.py", temp_path])
+
+            with pytest.raises(SystemExit) as excinfo:
+                main()
+
+            assert excinfo.value.code == 1
+            captured = capsys.readouterr()
+            assert "Error:" in captured.err
         finally:
             Path(temp_path).unlink()
