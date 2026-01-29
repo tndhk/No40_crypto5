@@ -480,3 +480,75 @@ class TestDCAStrategyProtections:
         strategy = DCAStrategy(default_config)
         methods = [p["method"] for p in strategy.protections]
         assert "LowProfitPairs" in methods
+
+
+class TestDCAStrategyRiskManagerFull:
+    """RiskManager追加メソッド統合のテストスイート"""
+
+    def test_entry_blocked_by_consecutive_losses(self, default_config):
+        """連続損失上限で新規エントリーをブロック"""
+        config = default_config.copy()
+        config['max_consecutive_losses'] = 3
+        strategy = DCAStrategy(config)
+
+        # 3回の連続損失を記録
+        strategy.risk_manager.record_trade_result(is_loss=True)
+        strategy.risk_manager.record_trade_result(is_loss=True)
+        strategy.risk_manager.record_trade_result(is_loss=True)
+
+        # エントリー確認を実行（連続損失上限到達）
+        result = strategy.confirm_trade_entry(
+            pair='BTC/JPY',
+            order_type='limit',
+            amount=0.01,
+            rate=4000000.0,
+            time_in_force='GTC',
+            current_time=datetime.now(),
+            entry_tag=None,
+            side='long'
+        )
+
+        # 連続損失上限到達のためFalse（エントリーブロック）
+        assert result is False
+
+    def test_trade_result_recorded_on_exit(self, default_config):
+        """エグジット時にトレード結果が記録される"""
+        strategy = DCAStrategy(default_config)
+
+        # 初期状態: 連続損失カウント0
+        assert strategy.risk_manager.consecutive_loss_count == 0
+
+        # 損失トレードをシミュレート
+        mock_trade = MagicMock()
+        mock_trade.pair = 'BTC/JPY'
+        mock_trade.open_rate = 4000000.0
+        mock_trade.close_rate = 3800000.0  # -5%の損失
+
+        # custom_exit()を呼び出してトレード結果を記録
+        exit_result = strategy.custom_exit(
+            pair='BTC/JPY',
+            trade=mock_trade,
+            current_time=datetime.now(),
+            current_rate=3800000.0,
+            current_profit=-0.05
+        )
+
+        # トレード結果が記録され、連続損失カウントが増加
+        assert strategy.risk_manager.consecutive_loss_count == 1
+
+        # 利益トレードをシミュレート
+        mock_trade2 = MagicMock()
+        mock_trade2.pair = 'ETH/JPY'
+        mock_trade2.open_rate = 200000.0
+        mock_trade2.close_rate = 210000.0  # +5%の利益
+
+        strategy.custom_exit(
+            pair='ETH/JPY',
+            trade=mock_trade2,
+            current_time=datetime.now(),
+            current_rate=210000.0,
+            current_profit=0.05
+        )
+
+        # 利益トレードで連続損失カウントがリセット
+        assert strategy.risk_manager.consecutive_loss_count == 0

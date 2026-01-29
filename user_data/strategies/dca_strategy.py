@@ -336,6 +336,10 @@ class DCAStrategy(IStrategy):
         Returns:
             True: 注文許可, False: 注文拒否
         """
+        # 連続損失上限チェック
+        if not self.risk_manager.check_consecutive_losses():
+            return False
+
         # 期待価格が記録されている場合のみスリッページチェック
         if pair in self.expected_entry_price:
             expected_price = self.expected_entry_price[pair]
@@ -343,3 +347,37 @@ class DCAStrategy(IStrategy):
                 return False
 
         return True
+
+    def custom_exit(
+        self,
+        pair: str,
+        trade: Trade,
+        current_time: datetime,
+        current_rate: float,
+        current_profit: float,
+        **kwargs
+    ) -> Optional[str]:
+        """
+        カスタムエグジットロジック
+
+        Args:
+            pair: 通貨ペア
+            trade: トレードオブジェクト
+            current_time: 現在時刻
+            current_rate: 現在のレート
+            current_profit: 現在の利益率
+            **kwargs: その他のパラメータ
+
+        Returns:
+            エグジット理由（なしの場合None）
+        """
+        # トレード結果を記録
+        is_loss = current_profit < 0
+        self.risk_manager.record_trade_result(is_loss)
+
+        # ストップロスに到達した場合はクールダウンをトリガー
+        if is_loss and current_profit <= self.stoploss:
+            self.risk_manager.trigger_cooldown(current_time)
+
+        # カスタムエグジット条件はなし（Freqtradeのデフォルトロジックを使用）
+        return None
