@@ -12,7 +12,7 @@ from freqtrade.persistence import Trade
 from freqtrade.strategy import DecimalParameter, IStrategy
 from pandas import DataFrame
 
-from user_data.strategies.indicators import calculate_rsi
+from user_data.strategies.indicators import calculate_rsi, calculate_volume_sma
 from user_data.strategies.market_regime import MarketRegime
 from user_data.strategies.risk_manager import RiskManager
 from user_data.strategies.slippage_protection import SlippageProtection
@@ -130,6 +130,10 @@ class DCAStrategy(IStrategy):
         dataframe_with_rsi = calculate_rsi(dataframe, period=14)
         dataframe['rsi'] = dataframe_with_rsi['rsi_14']
 
+        # 出来高SMAを計算
+        dataframe_with_volume_sma = calculate_volume_sma(dataframe, period=20)
+        dataframe['volume_sma_20'] = dataframe_with_volume_sma['volume_sma_20']
+
         # 市場環境判定指標を追加
         dataframe = self.market_regime.add_regime_indicators(dataframe)
 
@@ -155,9 +159,10 @@ class DCAStrategy(IStrategy):
         if self.market_regime.should_suppress_entry(regime):
             return dataframe
 
-        # RSIが30以下（過売状態）でエントリー
+        # RSIが30以下（過売状態）かつ出来高がSMA20以上でエントリー
         dataframe.loc[
-            (dataframe['rsi'] <= 30),
+            (dataframe['rsi'] <= 30) &
+            (dataframe['volume'] > dataframe['volume_sma_20']),
             'enter_long'
         ] = 1
 

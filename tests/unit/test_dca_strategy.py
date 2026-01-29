@@ -28,33 +28,76 @@ class TestDCAStrategyEntrySignal:
         """RSIが30以下でエントリーシグナルを生成"""
         strategy = DCAStrategy(default_config)
 
-        # テストデータ作成
+        # テストデータ作成（25行必要: ADX計算とvolume SMA20計算のため）
         dataframe = pd.DataFrame({
-            'close': [100.0, 99.0, 98.0],
-            'rsi': [35.0, 28.0, 25.0],  # RSI < 30
-            'volume': [1000.0, 1100.0, 1200.0],
+            'close': [100.0] * 25,
+            'high': [102.0] * 25,
+            'low': [98.0] * 25,
+            'open': [100.0] * 25,
+            'volume': [1000.0] * 22 + [1100.0, 1200.0, 1300.0],  # 最後の3行でボリューム増加
         })
 
         metadata = {'pair': 'BTC/JPY'}
-        result = strategy.populate_entry_trend(dataframe, metadata)
 
-        # 最後の行でエントリーシグナルが立つことを確認
+        # populate_indicatorsで指標を追加
+        dataframe_with_indicators = strategy.populate_indicators(dataframe, metadata)
+        # RSIを手動で設定（過売状態をシミュレート）
+        dataframe_with_indicators['rsi'] = [35.0] * 22 + [28.0, 26.0, 25.0]
+
+        result = strategy.populate_entry_trend(dataframe_with_indicators, metadata)
+
+        # 最後の行でエントリーシグナルが立つことを確認（RSI < 30 かつ volume > SMA）
         assert result.iloc[-1]['enter_long'] == 1
 
     def test_no_entry_signal_when_rsi_not_oversold(self, default_config):
         """RSIが30以上ではエントリーシグナルなし"""
         strategy = DCAStrategy(default_config)
 
+        # テストデータ作成（25行必要: ADX計算とvolume SMA20計算のため）
         dataframe = pd.DataFrame({
-            'close': [100.0, 101.0, 102.0],
-            'rsi': [50.0, 55.0, 60.0],  # RSI > 30
-            'volume': [1000.0, 1100.0, 1200.0],
+            'close': [100.0] * 25,
+            'high': [102.0] * 25,
+            'low': [98.0] * 25,
+            'open': [100.0] * 25,
+            'volume': [1000.0] * 22 + [1100.0, 1200.0, 1300.0],  # ボリューム条件は満たす
         })
 
         metadata = {'pair': 'BTC/JPY'}
-        result = strategy.populate_entry_trend(dataframe, metadata)
 
-        # エントリーシグナルが立たないことを確認
+        # populate_indicatorsで指標を追加
+        dataframe_with_indicators = strategy.populate_indicators(dataframe, metadata)
+        # RSIを手動で設定（過売ではない状態）
+        dataframe_with_indicators['rsi'] = [50.0] * 22 + [55.0, 58.0, 60.0]
+
+        result = strategy.populate_entry_trend(dataframe_with_indicators, metadata)
+
+        # エントリーシグナルが立たないことを確認（RSI > 30）
+        assert result.iloc[-1]['enter_long'] == 0
+
+    def test_entry_requires_volume_above_sma(self, default_config):
+        """出来高がSMA以下の場合エントリーしない"""
+        strategy = DCAStrategy(default_config)
+
+        # 出来高がSMA以下のDataFrameを作成
+        # volume SMA20を計算すると平均1000になるようなデータ
+        dataframe = pd.DataFrame({
+            'close': [100.0] * 25,
+            'high': [102.0] * 25,
+            'low': [98.0] * 25,
+            'open': [100.0] * 25,
+            'volume': [1000.0] * 20 + [1050.0, 1000.0, 1000.0, 900.0, 800.0],  # 最後が800でSMA以下
+            'rsi': [35.0] * 20 + [35.0, 32.0, 28.0, 26.0, 25.0],  # RSI条件は満たす
+        })
+
+        metadata = {'pair': 'BTC/JPY'}
+
+        # populate_indicatorsで指標を追加
+        dataframe_with_indicators = strategy.populate_indicators(dataframe, metadata)
+
+        # populate_entry_trendでエントリーシグナルを生成
+        result = strategy.populate_entry_trend(dataframe_with_indicators, metadata)
+
+        # 最後の行ではエントリーしない（volume < volume_sma）
         assert result.iloc[-1]['enter_long'] == 0
 
 
