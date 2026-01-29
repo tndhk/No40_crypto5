@@ -39,6 +39,12 @@ class DCAStrategy(IStrategy):
         "120": 0.05,  # 2時間後: 5%
     }
 
+    # トレーリングストップ設定
+    trailing_stop = True
+    trailing_stop_positive = 0.02  # +2%でトレーリング
+    trailing_stop_positive_offset = 0.05  # +5%到達後に発動
+    trailing_only_offset_is_reached = True  # オフセット到達後のみトレーリング
+
     # Hyperoptパラメータ
     dca_threshold_1 = DecimalParameter(
         -0.10, -0.05, default=-0.07, decimals=2, space='buy', optimize=True

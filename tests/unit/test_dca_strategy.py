@@ -341,6 +341,14 @@ class TestDCAStrategyBasicConfiguration:
         strategy = DCAStrategy(default_config)
         assert strategy.timeframe == '1h'
 
+    def test_trailing_stop_configuration(self, default_config):
+        """trailing_stop関連の設定値を確認"""
+        strategy = DCAStrategy(default_config)
+        assert strategy.trailing_stop is True
+        assert strategy.trailing_stop_positive == 0.02
+        assert strategy.trailing_stop_positive_offset == 0.05
+        assert strategy.trailing_only_offset_is_reached is True
+
 
 class TestDCAStrategyPartialTakeProfit:
     """部分利確のテストスイート"""
