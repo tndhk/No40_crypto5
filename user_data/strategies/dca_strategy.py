@@ -12,10 +12,10 @@ from freqtrade.persistence import Trade
 from freqtrade.strategy import DecimalParameter, IStrategy
 from pandas import DataFrame
 
-from user_data.strategies.indicators import calculate_rsi, calculate_volume_sma
-from user_data.strategies.market_regime import MarketRegime
-from user_data.strategies.risk_manager import RiskManager
-from user_data.strategies.slippage_protection import SlippageProtection
+from indicators import calculate_rsi, calculate_volume_sma
+from market_regime import MarketRegime
+from risk_manager import RiskManager
+from slippage_protection import SlippageProtection
 
 
 class DCAStrategy(IStrategy):
@@ -153,17 +153,18 @@ class DCAStrategy(IStrategy):
         """
         dataframe['enter_long'] = 0
 
-        # 市場環境を判定
-        regime = self.market_regime.detect_regime(dataframe)
-
-        # ベア相場ではエントリーを抑制
-        if self.market_regime.should_suppress_entry(regime):
-            return dataframe
-
         # RSIが30以下（過売状態）かつ出来高がSMA20以上でエントリー
+        # ただし、非常に強いベア相場（EMA50 < EMA200 かつ ADX > 35 かつ RSI >= 15）ではエントリーを抑制
+        #   - ADX > 35: 非常に強いトレンド（30→35に緩和）
+        #   - RSI >= 15: RSI 15未満の極端な過売は許可（20→15に緩和）
         dataframe.loc[
             (dataframe['rsi'] <= 30) &
-            (dataframe['volume'] > dataframe['volume_sma_20']),
+            (dataframe['volume'] > dataframe['volume_sma_20']) &
+            ~(  # NOT (非常に強いベア相場)
+                (dataframe['ema_50'] < dataframe['ema_200']) &
+                (dataframe['adx'] > 35.0) &
+                (dataframe['rsi'] >= 15.0)
+            ),
             'enter_long'
         ] = 1
 
