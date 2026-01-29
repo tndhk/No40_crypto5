@@ -1,5 +1,5 @@
 {
-  "max_open_trades": 2,
+  "max_open_trades": 6,
   "stake_currency": "JPY",
   "stake_amount": 10000,
   "dry_run": true,
@@ -38,7 +38,15 @@
     "ccxt_async_config": {},
     "pair_whitelist": [
       "BTC/JPY",
-      "ETH/JPY"
+      "ETH/JPY",
+      "XRP/JPY",
+      "ADA/JPY",
+      "DOGE/JPY",
+      "DOT/JPY",
+      "MATIC/JPY",
+      "SOL/JPY",
+      "LINK/JPY",
+      "UNI/JPY"
     ],
     "pair_blacklist": [
       "BNB/.*"

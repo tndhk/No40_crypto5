@@ -100,6 +100,107 @@ class TestDCAStrategyEntrySignal:
         # 最後の行ではエントリーしない（volume < volume_sma）
         assert result.iloc[-1]['enter_long'] == 0
 
+    def test_entry_with_rsi_35(self, default_config):
+        """RSI=35でエントリーすることを確認"""
+        strategy = DCAStrategy(default_config)
+
+        # テストデータ作成（25行必要: ADX計算とvolume SMA20計算のため）
+        dataframe = pd.DataFrame({
+            'close': [100.0] * 25,
+            'high': [102.0] * 25,
+            'low': [98.0] * 25,
+            'open': [100.0] * 25,
+            'volume': [1000.0] * 22 + [1100.0, 1200.0, 1300.0],  # 最後の3行でボリューム増加
+        })
+
+        metadata = {'pair': 'BTC/JPY'}
+
+        # populate_indicatorsで指標を追加
+        dataframe_with_indicators = strategy.populate_indicators(dataframe, metadata)
+        # RSIを手動で設定（RSI=35の境界値）
+        dataframe_with_indicators['rsi'] = [40.0] * 22 + [36.0, 35.0, 35.0]
+
+        result = strategy.populate_entry_trend(dataframe_with_indicators, metadata)
+
+        # 最後の行でエントリーシグナルが立つことを確認（RSI = 35）
+        assert result.iloc[-1]['enter_long'] == 1
+
+    def test_entry_with_volume_90_percent_sma(self, default_config):
+        """Volume=0.9*SMAでエントリーすることを確認"""
+        strategy = DCAStrategy(default_config)
+
+        # テストデータ作成（25行必要: ADX計算とvolume SMA20計算のため）
+        # volume SMAが1000になるように設定
+        dataframe = pd.DataFrame({
+            'close': [100.0] * 25,
+            'high': [102.0] * 25,
+            'low': [98.0] * 25,
+            'open': [100.0] * 25,
+            'volume': [1000.0] * 22 + [1000.0, 1000.0, 900.0],  # 最後が900（SMAの90%）
+        })
+
+        metadata = {'pair': 'BTC/JPY'}
+
+        # populate_indicatorsで指標を追加
+        dataframe_with_indicators = strategy.populate_indicators(dataframe, metadata)
+        # RSI条件も満たす
+        dataframe_with_indicators['rsi'] = [40.0] * 22 + [32.0, 30.0, 28.0]
+
+        result = strategy.populate_entry_trend(dataframe_with_indicators, metadata)
+
+        # 最後の行でエントリーシグナルが立つことを確認（volume = 0.9 * SMA）
+        assert result.iloc[-1]['enter_long'] == 1
+
+    def test_entry_with_rsi_45(self, default_config):
+        """RSI=45でエントリーすることを確認"""
+        strategy = DCAStrategy(default_config)
+
+        # テストデータ作成（25行必要: ADX計算とvolume SMA20計算のため）
+        dataframe = pd.DataFrame({
+            'close': [100.0] * 25,
+            'high': [102.0] * 25,
+            'low': [98.0] * 25,
+            'open': [100.0] * 25,
+            'volume': [1000.0] * 22 + [1100.0, 1200.0, 1300.0],  # ボリューム条件は満たす
+        })
+
+        metadata = {'pair': 'BTC/JPY'}
+
+        # populate_indicatorsで指標を追加
+        dataframe_with_indicators = strategy.populate_indicators(dataframe, metadata)
+        # RSIを手動で設定（RSI=45の境界値）
+        dataframe_with_indicators['rsi'] = [50.0] * 22 + [46.0, 45.0, 45.0]
+
+        result = strategy.populate_entry_trend(dataframe_with_indicators, metadata)
+
+        # 最後の行でエントリーシグナルが立つことを確認（RSI = 45）
+        assert result.iloc[-1]['enter_long'] == 1
+
+    def test_no_entry_with_rsi_46(self, default_config):
+        """RSI=46ではエントリーしないことを確認"""
+        strategy = DCAStrategy(default_config)
+
+        # テストデータ作成（25行必要: ADX計算とvolume SMA20計算のため）
+        dataframe = pd.DataFrame({
+            'close': [100.0] * 25,
+            'high': [102.0] * 25,
+            'low': [98.0] * 25,
+            'open': [100.0] * 25,
+            'volume': [1000.0] * 22 + [1100.0, 1200.0, 1300.0],  # ボリューム条件は満たす
+        })
+
+        metadata = {'pair': 'BTC/JPY'}
+
+        # populate_indicatorsで指標を追加
+        dataframe_with_indicators = strategy.populate_indicators(dataframe, metadata)
+        # RSIを手動で設定（RSI=46は閾値超過）
+        dataframe_with_indicators['rsi'] = [50.0] * 22 + [47.0, 46.0, 46.0]
+
+        result = strategy.populate_entry_trend(dataframe_with_indicators, metadata)
+
+        # 最後の行でエントリーシグナルが立たないことを確認（RSI = 46 > 45）
+        assert result.iloc[-1]['enter_long'] == 0
+
 
 class TestDCAStrategyCustomStakeAmount:
     """カスタムステーク額のテストスイート"""
@@ -525,7 +626,7 @@ class TestDCAStrategyRiskManagerFull:
         mock_trade.close_rate = 3800000.0  # -5%の損失
 
         # custom_exit()を呼び出してトレード結果を記録
-        exit_result = strategy.custom_exit(
+        strategy.custom_exit(
             pair='BTC/JPY',
             trade=mock_trade,
             current_time=datetime.now(),

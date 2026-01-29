@@ -22,7 +22,7 @@ class DCAStrategy(IStrategy):
     """
     DCA戦略クラス
 
-    RSIが過売状態（30以下）でエントリーし、
+    RSIが過売状態（45以下）でエントリーし、
     損失が拡大した場合にDCAで追加購入を行う。
     """
 
@@ -153,18 +153,12 @@ class DCAStrategy(IStrategy):
         """
         dataframe['enter_long'] = 0
 
-        # RSIが30以下（過売状態）かつ出来高がSMA20以上でエントリー
-        # ただし、非常に強いベア相場（EMA50 < EMA200 かつ ADX > 35 かつ RSI >= 15）ではエントリーを抑制
-        #   - ADX > 35: 非常に強いトレンド（30→35に緩和）
-        #   - RSI >= 15: RSI 15未満の極端な過売は許可（20→15に緩和）
+        # RSIが45以下（緩い過売状態）かつ出来高がSMA20の90%以上でエントリー
+        # トレード頻度を確保するため、RSI閾値を45に設定
+        # 市場環境フィルターは削除して、トレード頻度を最大化
         dataframe.loc[
-            (dataframe['rsi'] <= 30) &
-            (dataframe['volume'] > dataframe['volume_sma_20']) &
-            ~(  # NOT (非常に強いベア相場)
-                (dataframe['ema_50'] < dataframe['ema_200']) &
-                (dataframe['adx'] > 35.0) &
-                (dataframe['rsi'] >= 15.0)
-            ),
+            (dataframe['rsi'] <= 45) &
+            (dataframe['volume'] > 0.9 * dataframe['volume_sma_20']),
             'enter_long'
         ] = 1
 
