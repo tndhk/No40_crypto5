@@ -25,12 +25,31 @@ Operational runbook for the Crypto DCA Trading Bot. Covers deployment, monitorin
 
 | Component | Technology | Port/Location |
 |-----------|-----------|---------------|
-| Trading Bot | Freqtrade 2024.x | Foreground process |
+| Trading Bot | Freqtrade 2024.x (Python 3.11+) | Foreground process |
 | API Server | Freqtrade built-in (Flask/uvicorn) | http://127.0.0.1:8081 |
 | Database | SQLite | tradesv3.dryrun.sqlite (dry run) / tradesv3.sqlite (live) |
-| Notifications | Telegram Bot API | Chat ID configured in .env |
+| Notifications | Telegram Bot API | Chat ID configured via FREQTRADE__TELEGRAM__CHAT_ID |
 | Monitoring | heartbeat.sh + UptimeRobot | HEARTBEAT_URL in .env |
 | Exchange | Binance Japan via CCXT | API rate limit: 200ms/request |
+
+### Secret Management Architecture
+
+Secrets are managed using a layered approach to prevent accidental commits:
+
+```
+Layer 1: config.json          --> All secret fields set to "" (empty strings)
+Layer 2: .env                 --> Application-level env vars (TELEGRAM_TOKEN, etc.)
+Layer 3: FREQTRADE__*         --> Freqtrade config overrides (recommended)
+                                   e.g., FREQTRADE__TELEGRAM__TOKEN
+                                   e.g., FREQTRADE__API_SERVER__JWT_SECRET_KEY
+                                   e.g., FREQTRADE__API_SERVER__WS_TOKEN
+                                   e.g., FREQTRADE__API_SERVER__PASSWORD
+
+Validation:
+  validate_config.py          --> check_hardcoded_secrets(): detect non-empty secrets in JSON
+  validate_env.py             --> validate_config_env_consistency(): cross-check config vs env
+                              --> FREQTRADE__ variable completeness warning
+```
 
 ### Current Operating State (Phase 5)
 
@@ -40,17 +59,21 @@ Operational runbook for the Crypto DCA Trading Bot. Covers deployment, monitorin
 - Timeframe: 15m
 - Max Open Trades: 3
 - API Server: http://127.0.0.1:8081
+- Start Date: 2026-01-30
+- Expected End Date: 2026-02-13
 
 ### Strategy Parameters
 
 | Parameter | Value |
 |-----------|-------|
-| Entry signal | RSI <= 45 + bullish market regime |
+| Entry signal | RSI <= 45 + bullish market regime + volume filter |
 | Stoploss | -20% |
 | Trailing stop | +2% trail after +5% profit |
 | DCA Level 2 | -7% drawdown (1.25x multiplier) |
 | DCA Level 3 | -12% drawdown (1.50x multiplier) |
 | DCA Level 4 | -18% drawdown (1.75x multiplier) |
+| Partial take-profit | 33% at +8% unrealized profit |
+| Exit signal | RSI >= 70 |
 | Minimal ROI | 15% immediate, 10% after 45h, 5% after 90h |
 
 ---
@@ -64,6 +87,8 @@ Before starting the bot in any mode:
 - [ ] Virtual environment activated: `source .venv/bin/activate`
 - [ ] Environment variables set: `.venv/bin/python scripts/validate_env.py`
 - [ ] Configuration valid: `.venv/bin/python scripts/validate_config.py user_data/config/config.json`
+- [ ] No hardcoded secrets in config: validator will flag non-empty secret fields
+- [ ] FREQTRADE__* env vars set for all secrets (Telegram, API server)
 - [ ] Freqtrade installed: `.venv/bin/freqtrade --version`
 - [ ] Strategy file exists: `user_data/strategies/dca_strategy.py`
 - [ ] All tests pass: `pytest`
@@ -79,8 +104,8 @@ cd /Users/takahiko_tsunoda/work/dev/No40_Crypto5
 ```
 
 The script runs 5 preflight checks automatically:
-1. Environment variable validation
-2. Config.json validation
+1. Environment variable validation (via validate_env.py)
+2. Config.json validation (via validate_config.py)
 3. Freqtrade installation check
 4. Database directory check
 5. Strategy file check
@@ -106,6 +131,7 @@ Prerequisites specific to live mode:
 - [ ] config.live.json reviewed and validated
 - [ ] ENVIRONMENT=live in .env
 - [ ] BINANCE_API_KEY and BINANCE_API_SECRET set to live keys
+- [ ] All FREQTRADE__* override variables set for live config
 
 ```bash
 .venv/bin/freqtrade trade --config user_data/config/config.live.json --strategy DCAStrategy
@@ -266,7 +292,11 @@ lsof -i :8081
 # 2. Verify API is enabled in config.json
 #    "api_server": { "enabled": true, "listen_port": 8081 }
 
-# 3. Restart the bot
+# 3. Verify API server secrets are set via environment variables
+#    FREQTRADE__API_SERVER__JWT_SECRET_KEY must be non-empty
+#    FREQTRADE__API_SERVER__PASSWORD must be non-empty
+
+# 4. Restart the bot
 kill <freqtrade_pid>
 ./scripts/start_dryrun.sh
 ```
@@ -276,14 +306,17 @@ kill <freqtrade_pid>
 Symptom: Bot fails to start with config-related error.
 
 ```bash
-# 1. Validate config
+# 1. Validate config (checks schema, ranges, secret detection)
 .venv/bin/python scripts/validate_config.py user_data/config/config.json
 
-# 2. Validate environment
+# 2. Validate environment (checks .env + FREQTRADE__* consistency)
 .venv/bin/python scripts/validate_env.py
 
 # 3. Check for JSON syntax errors
 python -m json.tool user_data/config/config.json > /dev/null
+
+# 4. Common issue: secrets hardcoded in config.json
+#    Secret fields should be empty strings ""; values come from FREQTRADE__* env vars
 ```
 
 ### Exchange Connection Issues
@@ -324,14 +357,17 @@ cp backups/db/tradesv3.dryrun_<timestamp>.sqlite tradesv3.dryrun.sqlite
 Symptom: No messages in Telegram chat.
 
 ```bash
-# 1. Verify token and chat ID in .env
+# 1. Verify FREQTRADE__TELEGRAM__TOKEN and FREQTRADE__TELEGRAM__CHAT_ID are set
 .venv/bin/python scripts/validate_env.py
 
-# 2. Test Telegram API directly
+# 2. Test Telegram API directly (use actual token, not the env var name)
 curl "https://api.telegram.org/bot<TOKEN>/sendMessage?chat_id=<CHAT_ID>&text=test"
 
 # 3. Check logs for Telegram errors
 tail -200 user_data/logs/freqtrade.log | grep -i "telegram"
+
+# 4. Verify config.json has telegram.enabled = true
+#    and token/chat_id fields are empty (values come from FREQTRADE__ env vars)
 ```
 
 ### High API Error Rate
@@ -353,7 +389,7 @@ tail -500 user_data/logs/freqtrade.log | grep -i "error" | sort | uniq -c | sort
 
 Symptom: Very few trades generated during Dry Run.
 
-This is a known characteristic of the current strategy. Entry requires RSI <= 45 in a bullish market regime, which is relatively restrictive.
+This is a known characteristic of the current strategy (documented in `docs/backtest_summary.md`). The backtest produced only 7 trades in 687 days. Entry requires RSI <= 45 in a bullish market regime, which is relatively restrictive.
 
 Potential adjustments (requires backtesting validation):
 - Loosen RSI threshold
@@ -387,7 +423,7 @@ git log --oneline user_data/config/config.json.example
 # Restore previous config example
 git checkout <commit_hash> -- user_data/config/config.json.example
 cp user_data/config/config.json.example user_data/config/config.json
-# Edit config.json to add actual API keys/secrets
+# Edit config.json to ensure secret fields remain empty (secrets via FREQTRADE__* env vars)
 ```
 
 ### Rollback Database
@@ -463,11 +499,15 @@ If API keys may be compromised:
 
 1. Immediately disable/delete API key on Binance Japan
 2. Stop the bot
-3. Rotate all secrets in .env (JWT_SECRET_KEY, API_PASSWORD)
+3. Rotate all secrets:
+   - Generate new FREQTRADE__API_SERVER__JWT_SECRET_KEY
+   - Generate new FREQTRADE__API_SERVER__WS_TOKEN
+   - Generate new FREQTRADE__API_SERVER__PASSWORD (and API_PASSWORD in .env)
 4. Generate new API key on Binance with same restrictions (spot only, no withdrawal, IP restriction)
 5. Update .env with new credentials
-6. Review git history for accidental secret commits
-7. Restart and verify
+6. Review git history for accidental secret commits: `git log --all --diff-filter=A -- .env config.json`
+7. Run `validate_config.py` to confirm no secrets remain in JSON files
+8. Restart and verify
 
 ---
 
@@ -497,7 +537,7 @@ Download fresh OHLCV data before running backtests:
 ./scripts/download_data.sh
 ```
 
-Downloads 10 pairs across 4 timeframes (15m, 1h, 4h, 1d) from 2024-03-12 to present.
+Downloads pairs across 4 timeframes (15m, 1h, 4h, 1d) from 2024-03-12 to present.
 
 ### Log Rotation
 
@@ -551,6 +591,8 @@ Transition steps:
    - Create production API key on Binance Japan (spot only, no withdrawal, IP restricted)
    - Copy and customize live config: review `user_data/config/config.live.json`
    - Update .env: ENVIRONMENT=live, set production API credentials
+   - Set all FREQTRADE__* override variables for live config
+   - Verify no secrets in config.live.json: `.venv/bin/python scripts/validate_config.py user_data/config/config.live.json`
    - Start with minimum capital allocation
    - Monitor intensively for first 48 hours
 
@@ -558,6 +600,17 @@ Transition steps:
    - Identify root cause from logs and reports
    - Address issues (stability, strategy parameters, infrastructure)
    - Restart 14-day Dry Run cycle
+
+### Known Limitations at Phase Transition
+
+Per backtest results (`docs/backtest_summary.md`):
+- Only 7 trades in 687-day backtest period (ETH/JPY only)
+- Sharpe ratio: 0.28 (below 0.5 minimum target)
+- Trade frequency: 0.01 trades/day
+- Entry conditions may be too restrictive for most market conditions
+- Per `docs/hyperopt_assessment.md`: Hyperopt deferred due to insufficient sample size
+
+These limitations should be monitored during the Dry Run period and may require strategy parameter adjustments before proceeding to live trading.
 
 ### Emergency Revert (Live -> Dry Run)
 

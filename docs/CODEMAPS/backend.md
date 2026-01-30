@@ -1,6 +1,6 @@
 # Backend Codemap
 
-Last Updated: 2026-01-30
+Last Updated: 2026-01-30 (verified)
 Framework/Runtime: Python 3.11+ / Freqtrade 2024.x
 Entry Point: `user_data/strategies/dca_strategy.py`
 
@@ -113,22 +113,22 @@ Constructor: `max_slippage_percent` (default 0.5%)
 
 ### Python Scripts
 
-| Script                   | Lines | Data Classes          | Key Function                   | Purpose                            |
-|--------------------------|-------|-----------------------|--------------------------------|------------------------------------|
-| `analyze_backtest.py`    | 254   | BacktestMetrics, CriteriaResult | `evaluate_backtest(metrics)` | Evaluate backtest against min/target criteria |
-| `monte_carlo.py`         | 250   | MonteCarloResult      | `run_monte_carlo(trades, n, seed)` | Shuffle trade order, compute drawdown distribution |
-| `validate_config.py`     | 160   | ValidationResult      | `validate_config(config)`      | Check required fields, value ranges, warnings |
-| `validate_env.py`        | 145   | EnvValidationResult   | `validate_env(vars, mode)`     | Verify .env variables for dry_run/live |
-| `daily_report.py`        | 118   | DailyMetrics          | `format_daily_report(metrics)` | Generate daily text report          |
+| Script                   | Lines | Data Classes          | Key Functions                          | Purpose                            |
+|--------------------------|-------|-----------------------|----------------------------------------|------------------------------------|
+| `analyze_backtest.py`    | 254   | BacktestMetrics, CriteriaResult | `evaluate_backtest(metrics)`, `parse_backtest_json(path)` | Evaluate backtest against min/target criteria |
+| `monte_carlo.py`         | 250   | MonteCarloResult      | `run_monte_carlo(trades, n, seed)`, `_calculate_drawdown(cumulative)` | Shuffle trade order, compute drawdown distribution |
+| `validate_config.py`     | 239   | ValidationResult      | `validate_config(config)`, `check_hardcoded_secrets(config)`, `load_and_validate_config(path)` | Check required fields, value ranges, hardcoded secret detection |
+| `validate_env.py`        | 243   | EnvValidationResult   | `validate_env(vars, mode)`, `validate_config_env_consistency(config, env)` | Verify .env variables, FREQTRADE__ overrides, config-env consistency |
+| `daily_report.py`        | 118   | DailyMetrics          | `format_daily_report(metrics)`         | Generate daily text report          |
 | `check_dryrun_criteria.py` | 142 | DryRunMetrics, DryRunCriteriaResult | `evaluate_dryrun(metrics)` | Check uptime/errors/accuracy/Sharpe/days |
 
 ### Shell Scripts
 
 | Script              | Lines | Purpose                                          |
 |---------------------|-------|--------------------------------------------------|
-| `start_dryrun.sh`   | 110   | 5 preflight checks (env, config, freqtrade, db dir, strategy) then launch |
+| `start_dryrun.sh`   | 118   | 5 preflight checks (env, config, freqtrade, db dir, strategy) then launch |
 | `walk_forward.sh`   | 337   | IS/OOS/Final backtest + degradation analysis     |
-| `download_data.sh`  |  54   | Fetch OHLCV for 10 pairs, 4 timeframes from Binance |
+| `download_data.sh`  |  54   | Fetch OHLCV for pairs, 4 timeframes from Binance |
 | `backup_db.sh`      |  61   | SQLite backup with gzip, 30-day retention        |
 | `heartbeat.sh`      |  33   | Check freqtrade process, ping HEARTBEAT_URL      |
 
@@ -141,16 +141,16 @@ Constructor: `max_slippage_percent` (default 0.5%)
 | `test_dca_strategy.py`         | 747   | DCAStrategy              |
 | `test_monte_carlo.py`          | 507   | monte_carlo              |
 | `test_analyze_backtest.py`     | 494   | analyze_backtest         |
-| `test_validate_config.py`      | 292   | validate_config          |
+| `test_validate_config.py`      | 376   | validate_config          |
+| `test_validate_env.py`         | 244   | validate_env             |
 | `test_risk_manager.py`         | 208   | risk_manager             |
 | `test_market_regime.py`        | 187   | market_regime            |
 | `test_check_dryrun_criteria.py`| 156   | check_dryrun_criteria    |
 | `test_daily_report.py`         | 146   | daily_report             |
-| `test_validate_env.py`         | 134   | validate_env             |
 | `test_slippage_protection.py`  | 113   | slippage_protection      |
 | `test_indicators.py`           |  91   | indicators               |
 
-Shared fixtures in `conftest.py`: `default_conf`, `mock_exchange`, `mock_trade`
+Shared fixtures in `conftest.py` (43 lines): `default_conf`, `mock_exchange`, `mock_trade`
 
 ---
 

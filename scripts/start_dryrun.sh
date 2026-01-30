@@ -19,6 +19,14 @@ NC='\033[0m' # No Color
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
+# Load environment variables from .env file
+if [[ -f ".env" ]]; then
+    set -a
+    source .env
+    set +a
+    echo "Loaded environment variables from .env"
+fi
+
 # Check if preflight-only mode
 PREFLIGHT_ONLY=false
 if [[ "${1:-}" == "--preflight-only" ]]; then

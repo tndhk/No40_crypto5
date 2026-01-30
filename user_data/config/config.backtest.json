@@ -42,11 +42,8 @@
       "XRP/JPY",
       "ADA/JPY",
       "DOGE/JPY",
-      "DOT/JPY",
-      "MATIC/JPY",
       "SOL/JPY",
-      "LINK/JPY",
-      "UNI/JPY"
+      "LINK/JPY"
     ],
     "pair_blacklist": [
       "BNB/.*"

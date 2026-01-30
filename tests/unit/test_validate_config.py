@@ -11,6 +11,7 @@ import pytest
 
 from scripts.validate_config import (
     ValidationResult,
+    check_hardcoded_secrets,
     load_and_validate_config,
     main,
     validate_config,
@@ -290,3 +291,86 @@ class TestValidateConfigMain:
             assert "is valid" in captured.out
         finally:
             Path(temp_path).unlink()
+
+
+class TestCheckHardcodedSecrets:
+    """check_hardcoded_secrets()のテストスイート"""
+
+    def test_hardcoded_telegram_token_detected(self):
+        """Telegramトークンのハードコードを検出"""
+        config = {
+            "telegram": {
+                "token": "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz",
+                "chat_id": "123456789"
+            }
+        }
+
+        errors = check_hardcoded_secrets(config)
+
+        assert len(errors) > 0
+        assert any("telegram.token" in error for error in errors)
+
+    def test_hardcoded_api_password_detected(self):
+        """APIパスワードのハードコードを検出"""
+        config = {
+            "api_server": {
+                "password": "my_secret_password_123"
+            }
+        }
+
+        errors = check_hardcoded_secrets(config)
+
+        assert len(errors) > 0
+        assert any("api_server.password" in error for error in errors)
+
+    def test_hardcoded_jwt_secret_detected(self):
+        """JWT秘密鍵のハードコードを検出"""
+        config = {
+            "api_server": {
+                "jwt_secret_key": "super_secret_jwt_key_xyz"
+            }
+        }
+
+        errors = check_hardcoded_secrets(config)
+
+        assert len(errors) > 0
+        assert any("api_server.jwt_secret_key" in error for error in errors)
+
+    def test_placeholder_value_passes(self):
+        """プレースホルダー値は安全として扱う"""
+        config = {
+            "telegram": {
+                "token": "${TELEGRAM_TOKEN}",
+                "chat_id": "${TELEGRAM_CHAT_ID}"
+            },
+            "api_server": {
+                "password": "your_password_here",
+                "jwt_secret_key": "change_this_secret"
+            }
+        }
+
+        errors = check_hardcoded_secrets(config)
+
+        assert len(errors) == 0
+
+    def test_empty_secret_field_passes(self):
+        """空文字列のシークレットフィールドは安全"""
+        config = {
+            "telegram": {
+                "token": "",
+                "chat_id": ""
+            },
+            "api_server": {
+                "password": "",
+                "jwt_secret_key": "",
+                "ws_token": ""
+            },
+            "exchange": {
+                "key": "",
+                "secret": ""
+            }
+        }
+
+        errors = check_hardcoded_secrets(config)
+
+        assert len(errors) == 0

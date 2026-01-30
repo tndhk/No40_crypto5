@@ -1,6 +1,6 @@
 # Data Codemap
 
-Last Updated: 2026-01-30
+Last Updated: 2026-01-30 (verified)
 Framework/Runtime: Python 3.11+ / Freqtrade 2024.x
 
 ## Configuration Profiles
@@ -9,8 +9,8 @@ Four JSON config files in `user_data/config/`:
 
 | File                  | Purpose              | dry_run | max_open_trades | Pairs | Telegram | API Server |
 |-----------------------|----------------------|---------|-----------------|-------|----------|------------|
-| `config.json`         | Development/Dry Run  | true    | 2               | 10    | Yes      | Yes (8081) |
-| `config.backtest.json`| Historical testing   | true    | 6               | 10    | No       | No         |
+| `config.json`         | Development/Dry Run  | true    | 2               | 7     | Yes      | Yes (8081) |
+| `config.backtest.json`| Historical testing   | true    | 6               | 7     | No       | No         |
 | `config.hyperopt.json`| Parameter optimization | true  | 2               | 2     | No       | No         |
 | `config.live.json`    | Production (live)    | false   | 2               | 2     | Yes      | Yes (8080) |
 
@@ -44,8 +44,8 @@ Four JSON config files in `user_data/config/`:
   // -- Exchange --
   "exchange": {
     "name": "binance",
-    "key": str,                     // API key (empty for dry run)
-    "secret": str,                  // API secret (empty for dry run)
+    "key": "",                      // Always empty (use FREQTRADE__ env vars)
+    "secret": "",                   // Always empty (use FREQTRADE__ env vars)
     "ccxt_config": {
       "rateLimit": 200,             // 200ms between requests
       "enableRateLimit": true
@@ -71,6 +71,23 @@ Four JSON config files in `user_data/config/`:
     "exit": "GTC"
   },
 
+  // -- Telegram (secrets via FREQTRADE__TELEGRAM__TOKEN etc.) --
+  "telegram": {
+    "enabled": bool,
+    "token": "",                    // Empty; set FREQTRADE__TELEGRAM__TOKEN
+    "chat_id": ""                   // Empty; set FREQTRADE__TELEGRAM__CHAT_ID
+  },
+
+  // -- API Server (secrets via FREQTRADE__API_SERVER__* etc.) --
+  "api_server": {
+    "enabled": bool,
+    "listen_ip_address": "127.0.0.1",
+    "listen_port": int,             // 8081 (dry run) or 8080 (live)
+    "jwt_secret_key": "",           // Empty; set FREQTRADE__API_SERVER__JWT_SECRET_KEY
+    "ws_token": "",                 // Empty; set FREQTRADE__API_SERVER__WS_TOKEN
+    "password": ""                  // Empty; set FREQTRADE__API_SERVER__PASSWORD
+  },
+
   // -- Custom Risk Parameters (passed to strategy __init__) --
   "max_position_size": 100000,           // JPY - Max single position
   "max_portfolio_allocation": 0.2,       // 20% of total per position
@@ -84,9 +101,8 @@ Four JSON config files in `user_data/config/`:
 
 ## Trading Pairs
 
-Whitelist (Dry Run / Backtest -- 10 pairs):
-- BTC/JPY, ETH/JPY, XRP/JPY, ADA/JPY, DOGE/JPY
-- DOT/JPY, MATIC/JPY, SOL/JPY, LINK/JPY, UNI/JPY
+Whitelist (Dry Run / Backtest -- 7 pairs):
+- BTC/JPY, ETH/JPY, XRP/JPY, ADA/JPY, DOGE/JPY, SOL/JPY, LINK/JPY
 
 Whitelist (Hyperopt / Live -- 2 pairs):
 - BTC/JPY, ETH/JPY
@@ -109,8 +125,6 @@ Start date: 2024-03-12
 | SOL/JPY  | 15m, 1h, 4h, 1d        |
 | LINK/JPY | 15m, 1h, 4h, 1d        |
 | BTC/USDT | 15m (only)              |
-
-DOT/JPY, MATIC/JPY, UNI/JPY data not yet downloaded.
 
 ## Database Schema
 
@@ -166,6 +180,8 @@ All dataclasses in the project use `frozen=True`:
 
 ## Environment Variables (`.env`)
 
+### Application-Level Variables
+
 | Variable            | Required (dry_run) | Required (live) | Purpose                     |
 |---------------------|--------------------|-----------------|-----------------------------|
 | TELEGRAM_TOKEN      | Yes                | Yes             | Telegram bot notifications  |
@@ -176,6 +192,20 @@ All dataclasses in the project use `frozen=True`:
 | BINANCE_API_SECRET  | No                 | Yes             | Exchange API secret         |
 | HEARTBEAT_URL       | Optional           | Optional        | Uptime monitoring endpoint  |
 | ENVIRONMENT         | Optional           | Optional        | "dry_run" or "live"         |
+
+### Freqtrade Config Override Variables (Recommended)
+
+These override values in config JSON files at runtime:
+
+| Variable                                | Overrides Config Path           |
+|-----------------------------------------|---------------------------------|
+| FREQTRADE__TELEGRAM__TOKEN              | telegram.token                  |
+| FREQTRADE__TELEGRAM__CHAT_ID            | telegram.chat_id                |
+| FREQTRADE__API_SERVER__JWT_SECRET_KEY   | api_server.jwt_secret_key       |
+| FREQTRADE__API_SERVER__WS_TOKEN         | api_server.ws_token             |
+| FREQTRADE__API_SERVER__PASSWORD          | api_server.password             |
+
+Config files keep secret fields as empty strings (""). Actual values are injected via these environment variables. This prevents secrets from being committed to version control.
 
 ## Related Codemaps
 

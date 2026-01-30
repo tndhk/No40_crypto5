@@ -3,6 +3,7 @@
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -12,6 +13,87 @@ class EnvValidationResult:
     valid: bool
     errors: tuple[str, ...]
     warnings: tuple[str, ...]
+
+
+def validate_config_env_consistency(
+    config: dict[str, Any], env_vars: dict[str, str]
+) -> tuple[str, ...]:
+    """
+    設定ファイルと環境変数の整合性を検証（純粋関数）
+
+    configにハードコードされた秘密情報がある場合にエラーを返す。
+    FREQTRADE__環境変数で上書きされる前提のため、configは空文字列であるべき。
+
+    Args:
+        config: 検証する設定辞書
+        env_vars: 環境変数の辞書
+
+    Returns:
+        tuple[str, ...]: エラーメッセージのタプル
+    """
+    errors: list[str] = []
+
+    # config内の秘密フィールドをチェック
+    secret_fields = [
+        ("telegram", "token"),
+        ("telegram", "chat_id"),
+        ("api_server", "password"),
+        ("api_server", "jwt_secret_key"),
+        ("api_server", "ws_token"),
+        ("exchange", "key"),
+        ("exchange", "secret"),
+    ]
+
+    for parent_key, field_key in secret_fields:
+        if parent_key not in config:
+            continue
+
+        parent = config[parent_key]
+        if not isinstance(parent, dict) or field_key not in parent:
+            continue
+
+        value = parent[field_key]
+        if not isinstance(value, str):
+            continue
+
+        # 空文字列またはプレースホルダーは安全
+        if _is_safe_value(value):
+            continue
+
+        # ハードコードされた秘密情報を検出
+        errors.append(
+            f"Config contains hardcoded secret in '{parent_key}.{field_key}'. "
+            f"Use empty string in config and set FREQTRADE__{parent_key.upper()}__{field_key.upper()} "
+            f"environment variable instead."
+        )
+
+    return tuple(errors)
+
+
+def _is_safe_value(value: str) -> bool:
+    """
+    値が安全（空またはプレースホルダー）かどうかを判定
+
+    Args:
+        value: 検証する値
+
+    Returns:
+        bool: 安全な値の場合True
+    """
+    # 空文字列
+    if not value or value.strip() == "":
+        return True
+
+    # プレースホルダーパターン: ${VAR}
+    if value.startswith("${"):
+        return True
+
+    # サンプル値パターン
+    safe_prefixes = ("your_", "change_this_")
+    if any(value.lower().startswith(prefix) for prefix in safe_prefixes):
+        return True
+
+    return False
 
 
 def validate_env(env_vars: dict[str, str], mode: str = "dry_run") -> EnvValidationResult:
@@ -84,6 +166,22 @@ def validate_env(env_vars: dict[str, str], mode: str = "dry_run") -> EnvValidati
             errors.append(
                 f"ENVIRONMENT must be 'dry_run' or 'live', got: {env_value}"
             )
+
+    # Check FREQTRADE__ environment variables
+    freqtrade_vars = [
+        "FREQTRADE__TELEGRAM__TOKEN",
+        "FREQTRADE__TELEGRAM__CHAT_ID",
+        "FREQTRADE__API_SERVER__JWT_SECRET_KEY",
+        "FREQTRADE__API_SERVER__PASSWORD",
+        "FREQTRADE__API_SERVER__WS_TOKEN",
+    ]
+
+    missing_freqtrade_vars = [var for var in freqtrade_vars if var not in env_vars]
+    if missing_freqtrade_vars:
+        warnings.append(
+            f"FREQTRADE__ environment variables not set: {', '.join(missing_freqtrade_vars)}. "
+            "These override config file values and are recommended for secret management."
+        )
 
     return EnvValidationResult(
         valid=len(errors) == 0,

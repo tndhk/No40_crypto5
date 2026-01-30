@@ -169,7 +169,7 @@ Available in Telegram chat with the bot:
 
 **DCAStrategy (user_data/strategies/dca_strategy.py)**
 - Main strategy class inheriting from IStrategy
-- Entry logic: RSI-based oversold detection (RSI <= 30)
+- Entry logic: RSI-based entry (RSI <= 45) with volume confirmation
 - DCA position adjustments: 3 additional buys at -7%, -12%, -18% drawdowns
 - Partial take-profit: 33% position at +8% profit
 - Risk management integration via RiskManager
@@ -195,6 +195,11 @@ All modules follow immutable design:
 - `config.live.json`: Production deployment (higher stakes)
 
 All configs stored in `user_data/config/`
+
+### Secret Management
+Secrets are provided via Freqtrade's native FREQTRADE__ environment variable overrides.
+Config files contain empty strings for secret fields.
+See .env.example for required variables.
 
 ### Test Structure
 Tests follow AAA pattern (Arrange-Act-Assert):
@@ -254,7 +259,7 @@ Success criteria:
 ### Strategy Settings
 - Trading pairs: BTC/JPY, ETH/JPY, XRP/JPY, ADA/JPY, DOGE/JPY, SOL/JPY, LINK/JPY (Binance Japan)
 - Timeframe: 15m (currently active)
-- Entry signal: RSI <= 45 (oversold) + bullish market regime
+- Entry signal: RSI <= 45 (oversold) + volume filter (market regime filter removed for trade frequency)
 - Exit signal: Minimal ROI (15% immediate, 10% after 45h, 5% after 90h)
 - Stoploss: -20%
 - Trailing stop: +2% trail after +5% profit reached
@@ -262,12 +267,11 @@ Success criteria:
 - Stake per trade: 10,000-50,000 JPY
 
 ### DCA Levels
-- Level 1: Initial entry at RSI <= 45 (bullish regime)
+- Level 1: Initial entry at RSI <= 45
 - Level 2: Add at -7% unrealized P&L (multiplier: base x 1.25)
 - Level 3: Add at -12% unrealized P&L (multiplier: base x 1.50)
 - Level 4: Add at -18% unrealized P&L (multiplier: base x 1.75)
 - Max 3 additional entries (trade.nr_of_successful_entries <= 3)
-- DCA execution constraint: Not during price decline (last candle must not be red)
 
 ### Risk Management Thresholds
 - Portfolio allocation: Max 20% per position

@@ -14,7 +14,7 @@ log() {
 log "Starting data download..."
 
 # ペアのリスト（config.backtest.jsonと同期）
-PAIRS=("BTC/JPY" "ETH/JPY" "XRP/JPY" "ADA/JPY" "DOGE/JPY" "DOT/JPY" "MATIC/JPY" "SOL/JPY" "LINK/JPY" "UNI/JPY")
+PAIRS=("BTC/JPY" "ETH/JPY" "XRP/JPY" "ADA/JPY" "DOGE/JPY" "SOL/JPY" "LINK/JPY")
 
 # 時間足のリスト
 TIMEFRAMES=("15m" "1h" "4h" "1d")

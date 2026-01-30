@@ -26,6 +26,81 @@ class ValidationResult:
     warnings: tuple[str, ...]
 
 
+def check_hardcoded_secrets(config: dict[str, Any]) -> tuple[str, ...]:
+    """
+    設定ファイル内のハードコードされた秘密情報を検出（純粋関数）
+
+    Args:
+        config: 検証する設定辞書
+
+    Returns:
+        tuple[str, ...]: 検出されたハードコードされた秘密情報のエラーメッセージ
+    """
+    errors: list[str] = []
+
+    # 検証対象のシークレットフィールド
+    secret_fields = [
+        ("telegram", "token"),
+        ("telegram", "chat_id"),
+        ("api_server", "password"),
+        ("api_server", "jwt_secret_key"),
+        ("api_server", "ws_token"),
+        ("exchange", "key"),
+        ("exchange", "secret"),
+    ]
+
+    for parent_key, field_key in secret_fields:
+        if parent_key not in config:
+            continue
+
+        parent = config[parent_key]
+        if not isinstance(parent, dict) or field_key not in parent:
+            continue
+
+        value = parent[field_key]
+        if not isinstance(value, str):
+            continue
+
+        # 安全なパターン: 空文字列、プレースホルダー、サンプル値
+        if _is_safe_secret_value(value):
+            continue
+
+        # ハードコードされた秘密情報を検出
+        errors.append(
+            f"Hardcoded secret detected in '{parent_key}.{field_key}'. "
+            f"Use FREQTRADE__{parent_key.upper()}__{field_key.upper()} "
+            f"environment variable instead."
+        )
+
+    return tuple(errors)
+
+
+def _is_safe_secret_value(value: str) -> bool:
+    """
+    秘密情報の値が安全（プレースホルダーまたは空）かどうかを判定
+
+    Args:
+        value: 検証する値
+
+    Returns:
+        bool: 安全な値の場合True
+    """
+    # 空文字列
+    if not value or value.strip() == "":
+        return True
+
+    # プレースホルダーパターン: ${VAR}
+    if value.startswith("${"):
+        return True
+
+    # サンプル値パターン
+    safe_prefixes = ("your_", "change_this_")
+    if any(value.lower().startswith(prefix) for prefix in safe_prefixes):
+        return True
+
+    return False
+
+
 def validate_config(config: dict[str, Any]) -> ValidationResult:
     """
     設定辞書の妥当性を検証（純粋関数）
@@ -38,6 +113,10 @@ def validate_config(config: dict[str, Any]) -> ValidationResult:
     """
     errors: list[str] = []
     warnings: list[str] = []
+
+    # ハードコードされた秘密情報のチェック
+    secret_errors = check_hardcoded_secrets(config)
+    errors.extend(secret_errors)
 
     # 必須フィールドのチェック
     required_fields = ["max_open_trades", "stake_currency", "stake_amount", "dry_run"]

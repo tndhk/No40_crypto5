@@ -132,3 +132,113 @@ class TestEnvValidationResult:
         result = EnvValidationResult(valid=True, errors=(), warnings=("warn1",))
         assert isinstance(result.warnings, tuple)
         assert len(result.warnings) == 1
+
+
+class TestFreqtradeEnvVars:
+    """Test FREQTRADE__ environment variable validation."""
+
+    def test_freqtrade_env_vars_present_passes(self):
+        """FREQTRADE__環境変数が設定されている場合はパス"""
+        env_vars = {
+            "TELEGRAM_TOKEN": "123456:ABC-DEF",
+            "TELEGRAM_CHAT_ID": "123456789",
+            "JWT_SECRET_KEY": "jwt_secret",
+            "API_PASSWORD": "api_pass",
+            "FREQTRADE__TELEGRAM__TOKEN": "123456:ABC-DEF",
+            "FREQTRADE__TELEGRAM__CHAT_ID": "123456789",
+            "FREQTRADE__API_SERVER__JWT_SECRET_KEY": "jwt_secret",
+            "FREQTRADE__API_SERVER__PASSWORD": "api_pass",
+            "FREQTRADE__API_SERVER__WS_TOKEN": "ws_token",
+        }
+
+        result = validate_env(env_vars, mode="dry_run")
+
+        assert result.valid is True
+        assert len(result.errors) == 0
+
+    def test_missing_freqtrade_env_vars_warns(self):
+        """FREQTRADE__環境変数が欠落している場合は警告"""
+        env_vars = {
+            "TELEGRAM_TOKEN": "123456:ABC-DEF",
+            "TELEGRAM_CHAT_ID": "123456789",
+            "JWT_SECRET_KEY": "jwt_secret",
+            "API_PASSWORD": "api_pass",
+        }
+
+        result = validate_env(env_vars, mode="dry_run")
+
+        assert result.valid is True
+        assert len(result.warnings) > 0
+        assert any("FREQTRADE__" in warn for warn in result.warnings)
+
+    def test_config_hardcoded_secret_with_env_cross_check_fails(self):
+        """config内のハードコード秘密とenv変数の整合性チェック"""
+        import json
+        import tempfile
+        from pathlib import Path
+
+        config = {
+            "telegram": {
+                "token": "hardcoded_token_12345",
+                "chat_id": "987654321"
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(config, f)
+            config_path = f.name
+
+        try:
+            env_vars = {
+                "TELEGRAM_TOKEN": "123456:ABC-DEF",
+                "TELEGRAM_CHAT_ID": "123456789",
+                "JWT_SECRET_KEY": "jwt_secret",
+                "API_PASSWORD": "api_pass",
+            }
+
+            from scripts.validate_env import validate_config_env_consistency
+            errors = validate_config_env_consistency(config, env_vars)
+
+            assert len(errors) > 0
+            assert any("hardcoded" in error.lower() for error in errors)
+        finally:
+            Path(config_path).unlink()
+
+    def test_empty_config_with_freqtrade_env_override_passes(self):
+        """configが空文字列でFREQTRADE__変数がある場合はパス"""
+        import json
+        import tempfile
+        from pathlib import Path
+
+        config = {
+            "telegram": {
+                "token": "",
+                "chat_id": ""
+            },
+            "api_server": {
+                "jwt_secret_key": "",
+                "password": "",
+                "ws_token": ""
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(config, f)
+            config_path = f.name
+
+        try:
+            env_vars = {
+                "TELEGRAM_TOKEN": "123456:ABC-DEF",
+                "TELEGRAM_CHAT_ID": "123456789",
+                "JWT_SECRET_KEY": "jwt_secret",
+                "API_PASSWORD": "api_pass",
+                "FREQTRADE__TELEGRAM__TOKEN": "123456:ABC-DEF",
+                "FREQTRADE__TELEGRAM__CHAT_ID": "123456789",
+            }
+
+            from scripts.validate_env import validate_config_env_consistency
+            errors = validate_config_env_consistency(config, env_vars)
+
+            assert len(errors) == 0
+        finally:
+            Path(config_path).unlink()
