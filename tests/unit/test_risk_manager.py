@@ -139,3 +139,70 @@ class TestRiskManager:
         # 24時間後
         after_cooldown = current_time + timedelta(hours=24, minutes=1)
         assert risk_manager.check_cooldown(after_cooldown) is True
+
+
+class TestRiskManagerDailyLossTracking:
+    """RiskManagerの日次損失追跡機能のテスト"""
+
+    def test_record_daily_loss_accumulates(self):
+        """同日の損失が累積される"""
+        rm = RiskManager(100000, 0.2, 0.05, 0.15, 3, 24)
+        t1 = datetime(2024, 6, 1, 10, 0)
+        t2 = datetime(2024, 6, 1, 14, 0)
+        rm.record_daily_loss(500.0, t1)
+        rm.record_daily_loss(300.0, t2)
+        assert rm.get_daily_loss(t2) == 800.0
+
+    def test_record_daily_loss_resets_on_new_day(self):
+        """日付が変わるとリセットされる"""
+        rm = RiskManager(100000, 0.2, 0.05, 0.15, 3, 24)
+        t1 = datetime(2024, 6, 1, 23, 0)
+        t2 = datetime(2024, 6, 2, 1, 0)
+        rm.record_daily_loss(500.0, t1)
+        rm.record_daily_loss(100.0, t2)
+        assert rm.get_daily_loss(t2) == 100.0
+
+    def test_check_daily_loss_limit_tracked_passes(self):
+        """日次損失が上限以内の場合True"""
+        rm = RiskManager(100000, 0.2, 0.05, 0.15, 3, 24)
+        rm.record_daily_loss(2000.0, datetime(2024, 6, 1))
+        # starting_balance=50000, limit=0.05 -> max_loss=2500
+        assert rm.check_daily_loss_limit_tracked(datetime(2024, 6, 1), 50000) is True
+
+    def test_check_daily_loss_limit_tracked_fails(self):
+        """日次損失が上限を超えた場合False"""
+        rm = RiskManager(100000, 0.2, 0.05, 0.15, 3, 24)
+        rm.record_daily_loss(3000.0, datetime(2024, 6, 1))
+        # starting_balance=50000, limit=0.05 -> max_loss=2500
+        assert rm.check_daily_loss_limit_tracked(datetime(2024, 6, 1), 50000) is False
+
+
+class TestRiskManagerCircuitBreakerTracking:
+    """RiskManagerのサーキットブレーカー追跡機能のテスト"""
+
+    def test_update_balance_tracks_peak(self):
+        """ピークバランスが更新される"""
+        rm = RiskManager(100000, 0.2, 0.05, 0.15, 3, 24)
+        rm.update_balance(50000)
+        rm.update_balance(55000)
+        rm.update_balance(52000)
+        assert rm.peak_balance == 55000
+
+    def test_check_circuit_breaker_tracked_passes(self):
+        """ドローダウンが閾値以内の場合True"""
+        rm = RiskManager(100000, 0.2, 0.05, 0.15, 3, 24)
+        rm.update_balance(50000)
+        # DD = (50000-45000)/50000 = 0.10 < 0.15
+        assert rm.check_circuit_breaker_tracked(45000) is True
+
+    def test_check_circuit_breaker_tracked_fails(self):
+        """ドローダウンが閾値を超えた場合False"""
+        rm = RiskManager(100000, 0.2, 0.05, 0.15, 3, 24)
+        rm.update_balance(50000)
+        # DD = (50000-42000)/50000 = 0.16 > 0.15
+        assert rm.check_circuit_breaker_tracked(42000) is False
+
+    def test_check_circuit_breaker_tracked_no_peak(self):
+        """ピーク未設定時はTrue（取引可能）"""
+        rm = RiskManager(100000, 0.2, 0.05, 0.15, 3, 24)
+        assert rm.check_circuit_breaker_tracked(50000) is True

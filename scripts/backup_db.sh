@@ -24,8 +24,8 @@ log() {
 
 # データベースファイルのリスト
 DB_FILES=(
-    "$PROJECT_ROOT/tradesv3.sqlite"
-    "$PROJECT_ROOT/tradesv3.dryrun.sqlite"
+    "$PROJECT_ROOT/user_data/tradesv3.sqlite"
+    "$PROJECT_ROOT/user_data/tradesv3.dryrun.sqlite"
 )
 
 for DB_FILE in "${DB_FILES[@]}"; do

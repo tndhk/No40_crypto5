@@ -230,6 +230,12 @@ class DCAStrategy(IStrategy):
         if not self.risk_manager.check_position_size(stake_amount):
             return None
 
+        # ポートフォリオ配分上限チェック
+        wallet_balance = kwargs.get('wallet_balance', 0)
+        if wallet_balance > 0:
+            if not self.risk_manager.check_portfolio_limit(stake_amount, wallet_balance):
+                return None
+
         # 初回エントリーは提案額をそのまま使用
         return stake_amount
 
@@ -344,6 +350,51 @@ class DCAStrategy(IStrategy):
 
         return True
 
+    def confirm_trade_exit(
+        self,
+        pair: str,
+        trade: Trade,
+        order_type: str,
+        amount: float,
+        rate: float,
+        time_in_force: str,
+        exit_reason: str,
+        current_time: datetime,
+        current_rate: float,
+        current_profit: float,
+        side: str,
+        **kwargs
+    ) -> bool:
+        """
+        エグジット注文の最終確認（エグジット確定時に1回だけ呼ばれる）
+
+        Args:
+            pair: 通貨ペア
+            trade: トレードオブジェクト
+            order_type: 注文タイプ
+            amount: 注文量
+            rate: 注文レート
+            time_in_force: 注文有効期限
+            exit_reason: エグジット理由
+            current_time: 現在時刻
+            current_rate: 現在のレート
+            current_profit: 現在の利益率
+            side: 'long' or 'short'
+            **kwargs: その他のパラメータ
+
+        Returns:
+            True: 注文許可, False: 注文拒否
+        """
+        # トレード結果を記録
+        is_loss = current_profit < 0
+        self.risk_manager.record_trade_result(is_loss)
+
+        # ストップロスの場合はクールダウンをトリガー
+        if exit_reason == 'stop_loss' or (is_loss and current_profit <= self.stoploss):
+            self.risk_manager.trigger_cooldown(current_time)
+
+        return True
+
     def custom_exit(
         self,
         pair: str,
@@ -367,13 +418,5 @@ class DCAStrategy(IStrategy):
         Returns:
             エグジット理由（なしの場合None）
         """
-        # トレード結果を記録
-        is_loss = current_profit < 0
-        self.risk_manager.record_trade_result(is_loss)
-
-        # ストップロスに到達した場合はクールダウンをトリガー
-        if is_loss and current_profit <= self.stoploss:
-            self.risk_manager.trigger_cooldown(current_time)
-
         # カスタムエグジット条件はなし（Freqtradeのデフォルトロジックを使用）
         return None

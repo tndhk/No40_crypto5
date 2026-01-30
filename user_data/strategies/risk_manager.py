@@ -4,7 +4,7 @@
 トレーディングにおけるリスク管理機能を提供する。
 """
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 
@@ -45,6 +45,9 @@ class RiskManager:
         # 内部状態
         self.consecutive_loss_count = 0
         self.cooldown_until: Optional[datetime] = None
+        self._daily_loss_date: Optional[date] = None
+        self._daily_loss_total: float = 0.0
+        self.peak_balance: float = 0.0
 
     def check_position_size(self, position_size: float) -> bool:
         """
@@ -145,3 +148,72 @@ class RiskManager:
 
         check_time = current_time if current_time else datetime.now()
         return check_time >= self.cooldown_until
+
+    def record_daily_loss(self, loss_amount: float, current_time: datetime) -> None:
+        """
+        日次損失を記録
+
+        Args:
+            loss_amount: 損失額（正の値）
+            current_time: 現在時刻
+        """
+        current_date = current_time.date()
+        if self._daily_loss_date != current_date:
+            self._daily_loss_date = current_date
+            self._daily_loss_total = 0.0
+        self._daily_loss_total += loss_amount
+
+    def get_daily_loss(self, current_time: datetime) -> float:
+        """
+        日次損失を取得
+
+        Args:
+            current_time: 現在時刻
+
+        Returns:
+            当日の累積損失額
+        """
+        current_date = current_time.date()
+        if self._daily_loss_date != current_date:
+            return 0.0
+        return self._daily_loss_total
+
+    def check_daily_loss_limit_tracked(self, current_time: datetime, starting_balance: float) -> bool:
+        """
+        内部追跡している日次損失が上限以内かチェック
+
+        Args:
+            current_time: 現在時刻
+            starting_balance: 開始時の残高
+
+        Returns:
+            True: 許容範囲内, False: 上限超過
+        """
+        daily_loss = self.get_daily_loss(current_time)
+        max_loss = starting_balance * self.daily_loss_limit
+        return daily_loss <= max_loss
+
+    def update_balance(self, current_balance: float) -> None:
+        """
+        バランスを更新し、ピークバランスを追跡
+
+        Args:
+            current_balance: 現在のバランス
+        """
+        if current_balance > self.peak_balance:
+            self.peak_balance = current_balance
+
+    def check_circuit_breaker_tracked(self, current_balance: float) -> bool:
+        """
+        内部追跡しているピークバランスを使ってサーキットブレーカーをチェック
+
+        Args:
+            current_balance: 現在の残高
+
+        Returns:
+            True: 取引可能, False: サーキットブレーカー発動
+        """
+        if self.peak_balance <= 0:
+            return True
+        drawdown = (self.peak_balance - current_balance) / self.peak_balance
+        return drawdown < self.circuit_breaker_drawdown

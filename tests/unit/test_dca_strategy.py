@@ -612,44 +612,136 @@ class TestDCAStrategyRiskManagerFull:
         # 連続損失上限到達のためFalse（エントリーブロック）
         assert result is False
 
-    def test_trade_result_recorded_on_exit(self, default_config):
-        """エグジット時にトレード結果が記録される"""
-        strategy = DCAStrategy(default_config)
+class TestDCAStrategyConfirmTradeExit:
+    """エグジット確定時のトレード結果記録テスト"""
 
-        # 初期状態: 連続損失カウント0
+    def test_confirm_trade_exit_records_loss(self, default_config):
+        """エグジット確定時に損失トレードが記録される"""
+        strategy = DCAStrategy(default_config)
+        strategy.risk_manager.consecutive_loss_count = 0
+
+        mock_trade = MagicMock()
+        mock_trade.stake_amount = 10000
+
+        # current_profit < 0 の場合
+        result = strategy.confirm_trade_exit(
+            pair='BTC/JPY',
+            trade=mock_trade,
+            order_type='limit',
+            amount=1.0,
+            rate=100.0,
+            time_in_force='GTC',
+            exit_reason='exit_signal',
+            current_time=datetime(2024, 6, 1),
+            current_rate=95.0,
+            current_profit=-0.05,
+            side='long'
+        )
+        assert result is True
+        assert strategy.risk_manager.consecutive_loss_count == 1
+
+    def test_confirm_trade_exit_records_win(self, default_config):
+        """エグジット確定時に勝ちトレードが記録され連続損失カウンタがリセットされる"""
+        strategy = DCAStrategy(default_config)
+        strategy.risk_manager.consecutive_loss_count = 2
+
+        mock_trade = MagicMock()
+        mock_trade.stake_amount = 10000
+
+        result = strategy.confirm_trade_exit(
+            pair='BTC/JPY',
+            trade=mock_trade,
+            order_type='limit',
+            amount=1.0,
+            rate=100.0,
+            time_in_force='GTC',
+            exit_reason='exit_signal',
+            current_time=datetime(2024, 6, 1),
+            current_rate=105.0,
+            current_profit=0.05,
+            side='long'
+        )
+        assert result is True
         assert strategy.risk_manager.consecutive_loss_count == 0
 
-        # 損失トレードをシミュレート
-        mock_trade = MagicMock()
-        mock_trade.pair = 'BTC/JPY'
-        mock_trade.open_rate = 4000000.0
-        mock_trade.close_rate = 3800000.0  # -5%の損失
+    def test_confirm_trade_exit_triggers_cooldown_on_stoploss(self, default_config):
+        """ストップロスでのエグジット時にクールダウンがトリガーされる"""
+        strategy = DCAStrategy(default_config)
+        current_time = datetime(2024, 6, 1)
 
-        # custom_exit()を呼び出してトレード結果を記録
+        mock_trade = MagicMock()
+        mock_trade.stake_amount = 10000
+
+        result = strategy.confirm_trade_exit(
+            pair='BTC/JPY',
+            trade=mock_trade,
+            order_type='limit',
+            amount=1.0,
+            rate=100.0,
+            time_in_force='GTC',
+            exit_reason='stop_loss',
+            current_time=current_time,
+            current_rate=80.0,
+            current_profit=-0.20,
+            side='long'
+        )
+        assert result is True
+        assert strategy.risk_manager.cooldown_until is not None
+
+    def test_custom_exit_does_not_record_trade_result(self, default_config):
+        """custom_exit()はトレード結果を記録しない（バグ修正確認）"""
+        strategy = DCAStrategy(default_config)
+        strategy.risk_manager.consecutive_loss_count = 0
+
+        mock_trade = MagicMock()
+        mock_trade.stake_amount = 10000
+
         strategy.custom_exit(
             pair='BTC/JPY',
             trade=mock_trade,
-            current_time=datetime.now(),
-            current_rate=3800000.0,
+            current_time=datetime(2024, 6, 1),
+            current_rate=95.0,
             current_profit=-0.05
         )
-
-        # トレード結果が記録され、連続損失カウントが増加
-        assert strategy.risk_manager.consecutive_loss_count == 1
-
-        # 利益トレードをシミュレート
-        mock_trade2 = MagicMock()
-        mock_trade2.pair = 'ETH/JPY'
-        mock_trade2.open_rate = 200000.0
-        mock_trade2.close_rate = 210000.0  # +5%の利益
-
-        strategy.custom_exit(
-            pair='ETH/JPY',
-            trade=mock_trade2,
-            current_time=datetime.now(),
-            current_rate=210000.0,
-            current_profit=0.05
-        )
-
-        # 利益トレードで連続損失カウントがリセット
+        # バグ修正後: custom_exit()はトレード結果を記録しない
         assert strategy.risk_manager.consecutive_loss_count == 0
+
+
+class TestDCAStrategyPortfolioLimit:
+    """ポートフォリオ配分上限チェックのテスト"""
+
+    def test_stake_blocked_by_portfolio_limit(self, default_config):
+        """ポートフォリオ配分上限を超える場合Noneを返す"""
+        strategy = DCAStrategy(default_config)
+        # wallet_balance=50000, max_portfolio_allocation=0.2 -> max=10000
+        # proposed_stake=15000 > 10000 -> ブロック
+        result = strategy.custom_stake_amount(
+            pair='BTC/JPY',
+            current_time=datetime(2024, 6, 1),
+            current_rate=100.0,
+            proposed_stake=15000,
+            min_stake=100,
+            max_stake=50000,
+            leverage=1.0,
+            entry_tag=None,
+            side='long',
+            wallet_balance=50000
+        )
+        assert result is None
+
+    def test_stake_allowed_within_portfolio_limit(self, default_config):
+        """ポートフォリオ配分上限以内の場合はステーク額を返す"""
+        strategy = DCAStrategy(default_config)
+        result = strategy.custom_stake_amount(
+            pair='BTC/JPY',
+            current_time=datetime(2024, 6, 1),
+            current_rate=100.0,
+            proposed_stake=5000,
+            min_stake=100,
+            max_stake=50000,
+            leverage=1.0,
+            entry_tag=None,
+            side='long',
+            wallet_balance=50000
+        )
+        assert result == 5000
