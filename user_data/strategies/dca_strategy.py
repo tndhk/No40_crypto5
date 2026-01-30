@@ -251,7 +251,7 @@ class DCAStrategy(IStrategy):
         current_exit_rate: float,
         current_entry_profit: float,
         current_exit_profit: float,
-        side: str,
+        side: str = 'long',
         **kwargs
     ) -> Optional[float]:
         """
