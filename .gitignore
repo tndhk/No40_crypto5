@@ -17,6 +17,9 @@ user_data/plot/
 user_data/config/config.json
 *.dryrun.sqlite
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.reports/
 
 # Environment variables
 .env
