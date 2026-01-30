@@ -12,10 +12,10 @@ from freqtrade.persistence import Trade
 from freqtrade.strategy import DecimalParameter, IStrategy
 from pandas import DataFrame
 
-from .indicators import calculate_rsi, calculate_volume_sma
-from .market_regime import MarketRegime
-from .risk_manager import RiskManager
-from .slippage_protection import SlippageProtection
+from indicators import calculate_rsi, calculate_volume_sma
+from market_regime import MarketRegime
+from risk_manager import RiskManager
+from slippage_protection import SlippageProtection
 
 
 class DCAStrategy(IStrategy):
