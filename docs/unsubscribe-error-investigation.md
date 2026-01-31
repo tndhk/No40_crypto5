@@ -79,6 +79,65 @@ async def _continuously_async_watch_ohlcv(self, pair, timeframe, candle_type):
 
 ---
 
+## 関連ログ: REST APIフォールバック
+
+### 発生状況
+
+UnsubscribeError発生（06:45頃）の約1時間15分後に、全7ペアで以下のログが出力された:
+
+```
+2026-01-31 08:00:01 - freqtrade.exchange.exchange - INFO - Couldn't reuse watch for BTC/JPY, 15m, falling back to REST api. False, 1769814000000, 0, 2026-01-30T23:00:00, 1970-01-01T00:00:00
+（ETH, DOGE, SOL, LINK, ADA, XRP も同様）
+```
+
+発生回数: 1回のみ（数回程度）= 正常な過渡現象
+
+### メカニズム
+
+Freqtradeの `_try_build_from_websocket()` メソッド（exchange.py:2608-2642）がOHLCVデータをWSキャッシュから再利用しようとしたが、以下の条件で失敗した:
+
+**REST APIフォールバック条件（いずれか不成立時）:**
+1. WSキャッシュにキャンドルデータが存在する
+2. 最新キャンドルのタイムスタンプが前回キャンドル期間以降
+3. **最終WSリフレッシュ時刻がキャンドル中間点以降** ← 今回の不成立条件
+
+### ログパラメータの意味
+
+| パラメータ | 値 | 意味 |
+|-----------|---|------|
+| `False` | `candle_ts < last_refresh_time` | 1769814000000 < 0 の評価結果 |
+| `1769814000000` | candle_ts（ms） | 現在のキャンドル開始時刻 = 2026-01-30T23:00:00 UTC |
+| `0` | last_refresh_time（ms） | **WSの最終リフレッシュ時刻（デフォルト値0 = 一度もWS受信なし）** |
+| `2026-01-30T23:00:00` | format_ms_time(candle_ts) | candle_ts の人間可読形式 |
+| `1970-01-01T00:00:00` | format_ms_time(last_refresh_time) | last_refresh_time=0 のUNIXエポック原点表示 |
+
+`last_refresh_time = 0` は、`klines_last_refresh` 辞書（exchange_ws.py:177で更新）にそのペアのエントリがない = **WebSocketがそのペア/タイムフレームのOHLCVデータを一度も受信していない**ことを意味する。
+
+### 根本原因
+
+UnsubscribeError後のWebSocket再接続過渡期:
+
+1. 06:45 - UnsubscribeErrorでWS watchタスクが終了
+2. 次のキャンドルリフレッシュサイクルで `schedule_ohlcv` が新しいwatchタスクを起動
+3. 08:00 - **再起動直後の最初のキャンドルリフレッシュ時点では、WSからまだデータが届いていない**（`last_refresh_time = 0`）
+4. REST APIにフォールバックしてOHLCVデータを取得（正常動作）
+5. 次のサイクル以降、WSがデータを蓄積し、WSキャッシュから再利用されるようになる
+
+### 影響
+
+- データ取得: 問題なし（REST APIで正常にデータ取得、内容はWSと同一）
+- 取引判断: 影響なし（データソースが異なるだけで同じOHLCVデータ）
+- API負荷: 一時的にREST API呼び出しが増えるが、1〜数回であれば無視できるレベル
+- Phase 5基準: 影響なし（API error rate、uptimeに影響せず）
+
+### 結論
+
+**対処不要。** UnsubscribeErrorと同じく、Binance WebSocketの24時間接続リセットに伴う正常な過渡現象。
+
+もしこのログが15分ごとに継続的に出る場合は、WebSocketが完全に復旧していない可能性があるため、その際は再調査が必要。
+
+---
+
 ## 実装不要
 
 調査のみの依頼のため、コード変更は行わない。
