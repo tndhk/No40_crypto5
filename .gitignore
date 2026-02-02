@@ -43,3 +43,6 @@ htmlcov/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# launchd plist (user-local, use .plist.template instead)
+com.freqtrade.dca-bot.plist

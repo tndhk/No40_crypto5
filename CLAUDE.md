@@ -122,11 +122,14 @@ freqtrade hyperopt --config user_data/config/config.hyperopt.json --strategy DCA
 # Check heartbeat monitoring
 ./scripts/heartbeat.sh
 
+# Run bot diagnostics
+.venv/bin/python scripts/diagnose_bot.py
+
 # View real-time logs
-tail -f user_data/logs/freqtrade.log
+tail -f user_data/logs/freqtrade_bot.log
 
 # Check for errors/warnings
-tail -100 user_data/logs/freqtrade.log | grep -i "error\|warning"
+tail -100 user_data/logs/freqtrade_bot.log | grep -i "error\|warning"
 ```
 
 #### Database Operations
@@ -134,11 +137,11 @@ tail -100 user_data/logs/freqtrade.log | grep -i "error\|warning"
 # Backup database (run weekly on Sundays)
 ./scripts/backup_db.sh
 
-# Query recent trades
-sqlite3 user_data/tradesv3.dryrun.sqlite "SELECT * FROM trades ORDER BY id DESC LIMIT 10;"
+# Query recent trades (DB is at project root, not user_data/)
+sqlite3 tradesv3.dryrun.sqlite "SELECT * FROM trades ORDER BY id DESC LIMIT 10;"
 
 # Check database status
-sqlite3 user_data/tradesv3.dryrun.sqlite ".tables"
+sqlite3 tradesv3.dryrun.sqlite ".tables"
 ```
 
 #### API Server
@@ -204,7 +207,7 @@ See .env.example for required variables.
 ### Test Structure
 Tests follow AAA pattern (Arrange-Act-Assert):
 - `conftest.py`: Shared fixtures (default_conf, mock_exchange, mock_trade)
-- `tests/unit/`: Unit tests for each module (52+ tests)
+- `tests/unit/`: Unit tests for each module (152+ tests)
 - Coverage reporting: HTML + terminal-missing format
 - Coverage target: 80%+ (configured in pyproject.toml)
 
@@ -223,10 +226,10 @@ Current configuration:
 - Telegram notifications: Enabled
 
 Phase 5 success criteria (verified via `scripts/check_dryrun_criteria.py`):
-- Uptime >= 95%
-- API error rate <= 5%
+- Uptime >= 99%
+- API error rate < 1%
 - Order accuracy >= 98%
-- Sharpe ratio deviation <= 20% (vs backtest)
+- Sharpe ratio deviation <= 0.3 (absolute, vs backtest Sharpe 0.28)
 - Operation days >= 14
 
 See `docs/phase5-dryrun-operation.md` for daily/weekly tasks.
@@ -239,7 +242,7 @@ See `docs/phase5-dryrun-operation.md` for daily/weekly tasks.
 
 ### Testing Before Deployment
 Mandatory validation sequence:
-1. Unit tests: All 52+ tests passing
+1. Unit tests: All 152+ tests passing
 2. Config validation: `python scripts/validate_config.py`
 3. Backtest: 18+ months historical data (20240301-20260131)
 4. Walk-forward analysis: Out-of-sample validation
@@ -324,9 +327,15 @@ Organize by feature/domain, not by type.
 - `scripts/walk_forward.sh`: Walk-forward analysis for out-of-sample validation
 
 ### Monitoring Scripts
-- `scripts/daily_report.py`: Generate daily performance report (uptime, trades, P&L)
-- `scripts/check_dryrun_criteria.py`: Verify Phase 5 success criteria (95% uptime, 5% error rate, etc.)
+- `scripts/daily_report.py`: Generate daily performance report (API/DB auto-detection, file保存)
+- `scripts/check_dryrun_criteria.py`: Verify Phase 5 success criteria (API/DB auto-detection)
+- `scripts/diagnose_bot.py`: Bot diagnostic tool (process, API, DB, logs, env, Telegram検証)
+- `scripts/freqtrade_api_client.py`: Freqtrade REST API client module (共通ライブラリ)
 - `scripts/heartbeat.sh`: Uptime monitoring integration
+
+### Process Management
+- `com.freqtrade.dca-bot.plist`: macOS launchd config (auto-restart on crash)
+- `scripts/launchd_wrapper.sh`: Freqtrade launcher for launchd (.env読み込み + venv起動)
 
 ### Maintenance Scripts
 - `scripts/backup_db.sh`: Database backup (creates timestamped backup in `backups/`)
@@ -351,9 +360,16 @@ Organize by feature/domain, not by type.
 │   │   └── slippage_protection.py # Slippage validation
 │   ├── backtest_results/    # Backtest outputs
 │   └── logs/                # Application logs
+├── tradesv3.dryrun.sqlite   # Dry run database (at project root, NOT user_data/)
+├── com.freqtrade.dca-bot.plist # launchd auto-restart config
 ├── scripts/                 # Utility scripts (see above)
+│   ├── freqtrade_api_client.py # Freqtrade REST API client
+│   ├── diagnose_bot.py      # Bot diagnostic tool
+│   ├── check_dryrun_criteria.py # Dry run criteria checker
+│   ├── daily_report.py      # Daily report generator
+│   └── launchd_wrapper.sh   # launchd wrapper script
 ├── tests/
-│   ├── unit/                # Unit tests (52+ tests)
+│   ├── unit/                # Unit tests (152+ tests)
 │   └── conftest.py          # Shared test fixtures
 ├── docs/                    # Documentation
 │   ├── phase5-dryrun-operation.md # Current phase manual
