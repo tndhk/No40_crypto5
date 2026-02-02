@@ -501,6 +501,72 @@ class TestCollectMetricsFromApi:
         result = collect_metrics_from_api(config)
         assert result is None
 
+    @patch("scripts.check_dryrun_criteria.fetch_trades")
+    @patch("scripts.check_dryrun_criteria.fetch_logs")
+    def test_handles_list_format_logs(self, mock_logs, mock_trades):
+        """Should handle list-format log entries returned by the REST API."""
+        mock_trades.return_value = ApiResponse(
+            success=True,
+            data={
+                "trades": [
+                    {
+                        "close_profit_abs": 100,
+                        "close_profit": 0.05,
+                        "exit_reason": "roi",
+                        "is_open": False,
+                    },
+                    {
+                        "close_profit_abs": -50,
+                        "close_profit": -0.02,
+                        "exit_reason": "stop_loss",
+                        "is_open": False,
+                    },
+                    {
+                        "close_profit_abs": 200,
+                        "close_profit": 0.08,
+                        "exit_reason": "roi",
+                        "is_open": False,
+                    },
+                    {
+                        "close_profit_abs": 150,
+                        "close_profit": 0.06,
+                        "exit_reason": "trailing_stop_loss",
+                        "is_open": False,
+                    },
+                    {
+                        "close_profit_abs": 80,
+                        "close_profit": 0.03,
+                        "exit_reason": "roi",
+                        "is_open": False,
+                    },
+                ],
+            },
+            error="",
+            status_code=200,
+        )
+        # Simulate list-format log entries as returned by the Freqtrade REST API:
+        # [timestamp_str, epoch, logger_name, log_level, message]
+        mock_logs.return_value = ApiResponse(
+            success=True,
+            data={
+                "logs": [
+                    ["2026-01-30 10:00:00", 1770024949849.93, "freqtrade.main", "INFO", "Heartbeat"],
+                    ["2026-01-30 10:01:00", 1770024950000.00, "uvicorn.access", "INFO", 'GET /api/v1/trades'],
+                    ["2026-01-30 10:02:00", 1770024950100.00, "freqtrade.main", "INFO", "Heartbeat"],
+                ],
+            },
+            error="",
+            status_code=200,
+        )
+
+        config = ApiClientConfig()
+        result = collect_metrics_from_api(config)
+        assert result is not None
+        assert isinstance(result, DryRunMetrics)
+        assert result.uptime_percent == pytest.approx(100.0, abs=0.1)
+        assert result.api_error_rate == pytest.approx(0.0)
+        assert result.order_accuracy == pytest.approx(100.0)
+
 
 class TestCollectMetricsFromDb:
     """Test database-based metrics collection."""

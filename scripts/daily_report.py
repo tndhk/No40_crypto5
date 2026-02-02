@@ -123,7 +123,7 @@ def collect_daily_metrics_from_api(
     api_errors = sum(
         1
         for entry in log_entries
-        if isinstance(entry, (list, tuple)) and len(entry) >= 2 and "ERROR" in str(entry[1])
+        if isinstance(entry, (list, tuple)) and len(entry) >= 4 and "ERROR" in str(entry[3])
     )
 
     # --- uptime estimate ---

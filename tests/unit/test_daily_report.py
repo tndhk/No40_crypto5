@@ -198,9 +198,9 @@ class TestCollectDailyMetricsFromApi:
             success=True,
             data={
                 "logs": [
-                    ["2026-02-01 10:00:00", "INFO", "All good"],
-                    ["2026-02-01 10:01:00", "ERROR", "Something failed"],
-                    ["2026-02-01 10:02:00", "INFO", "Recovered"],
+                    ["2026-02-01 10:00:00", 1.0, "freqtrade", "INFO", "All good"],
+                    ["2026-02-01 10:01:00", 2.0, "freqtrade", "ERROR", "Something failed"],
+                    ["2026-02-01 10:02:00", 3.0, "freqtrade", "INFO", "Recovered"],
                 ]
             },
             error="",

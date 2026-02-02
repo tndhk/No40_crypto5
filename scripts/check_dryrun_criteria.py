@@ -318,10 +318,23 @@ def collect_metrics_from_api(
     logs_data = logs_resp.data or {}
 
     trades_list: list[dict] = trades_data.get("trades", []) if isinstance(trades_data, dict) else []
-    logs_list: list[dict] = logs_data.get("logs", []) if isinstance(logs_data, dict) else []
+    logs_raw: list = logs_data.get("logs", []) if isinstance(logs_data, dict) else []
 
-    uptime = calculate_uptime_from_logs(logs_list)
-    error_rate = calculate_api_error_rate_from_logs(logs_list)
+    # Convert list-format log entries (from API) to dict format.
+    # The Freqtrade REST API returns each log entry as a list:
+    #   [timestamp_str, epoch, logger_name, log_level, message]
+    log_dicts: list[dict] = []
+    for entry in logs_raw:
+        if isinstance(entry, (list, tuple)) and len(entry) >= 5:
+            log_dicts.append({
+                "timestamp": entry[0],
+                "message": f"{entry[3]} {entry[4]}",
+            })
+        elif isinstance(entry, dict):
+            log_dicts.append(entry)
+
+    uptime = calculate_uptime_from_logs(log_dicts)
+    error_rate = calculate_api_error_rate_from_logs(log_dicts)
     accuracy = calculate_order_accuracy_from_trades(trades_list)
     sharpe_dev = calculate_sharpe_deviation(trades_list)
     days = calculate_days_running(start_date)

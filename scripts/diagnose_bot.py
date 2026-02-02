@@ -325,7 +325,7 @@ def check_open_trades(db_path: str) -> DiagnosticResult:
 def run_all_diagnostics(project_root: str, api_config: ApiClientConfig) -> DiagnosticReport:
     """Run all diagnostic checks and produce an aggregated report."""
     db_path = str(Path(project_root) / "tradesv3.dryrun.sqlite")
-    log_path = str(Path(project_root) / "user_data" / "logs" / "freqtrade.log")
+    log_path = str(Path(project_root) / "user_data" / "logs" / "freqtrade_bot.log")
 
     results = [
         check_process_running(),
