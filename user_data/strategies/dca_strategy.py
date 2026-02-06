@@ -32,29 +32,29 @@ class DCAStrategy(IStrategy):
 
     # 基本設定
     timeframe = '15m'
-    stoploss = -0.20  # -20%
-    # minimal_roi: 15m足基準（暫定値、Hyperoptで最適化予定）
+    stoploss = -0.10  # -10% に短縮（致命傷を避ける）
+    # minimal_roi: 15m足基準
     minimal_roi = {
-        "0": 0.15,      # 即座: 15%
-        "180": 0.10,    # 180本後（45時間 = 12時間 × 48本/12h = 12時間）: 10%
-        "360": 0.05,    # 360本後（90時間 = 24時間 × 48本/24h = 24時間）: 5%
+        "0": 0.10,      # 即座: 10%
+        "180": 0.05,    # 180本後: 5%
+        "360": 0.02,    # 360本後: 2%
     }
 
     # トレーリングストップ設定
     trailing_stop = True
-    trailing_stop_positive = 0.02  # +2%でトレーリング
-    trailing_stop_positive_offset = 0.05  # +5%到達後に発動
-    trailing_only_offset_is_reached = True  # オフセット到達後のみトレーリング
+    trailing_stop_positive = 0.01  # +1%
+    trailing_stop_positive_offset = 0.03  # +3%到達後に発動
+    trailing_only_offset_is_reached = True
 
-    # Hyperoptパラメータ
+    # Hyperoptパラメータ (損切り-10%に合わせてレンジを浅く調整)
     dca_threshold_1 = DecimalParameter(
-        -0.10, -0.05, default=-0.07, decimals=2, space='buy', optimize=True
+        -0.05, -0.01, default=-0.03, decimals=2, space='buy', optimize=True
     )
     dca_threshold_2 = DecimalParameter(
-        -0.15, -0.08, default=-0.12, decimals=2, space='buy', optimize=True
+        -0.08, -0.03, default=-0.06, decimals=2, space='buy', optimize=True
     )
     dca_threshold_3 = DecimalParameter(
-        -0.20, -0.12, default=-0.18, decimals=2, space='buy', optimize=True
+        -0.10, -0.05, default=-0.09, decimals=2, space='buy', optimize=True
     )
 
     take_profit_threshold = DecimalParameter(
@@ -154,10 +154,11 @@ class DCAStrategy(IStrategy):
         dataframe['enter_long'] = 0
 
         # RSIが45以下（緩い過売状態）かつ出来高がSMA20の90%以上でエントリー
-        # トレード頻度を確保するため、RSI閾値を45に設定
-        # 市場環境フィルターは削除して、トレード頻度を最大化
+        # 市場環境フィルターは削除して、トレード頻度を確保
+        # ただし、急落時の買い（ナイフ掴み）を防ぐため、陽線（close > open）を必須とする
         dataframe.loc[
             (dataframe['rsi'] <= 45) &
+            (dataframe['close'] > dataframe['open']) &
             (dataframe['volume'] > 0.9 * dataframe['volume_sma_20']),
             'enter_long'
         ] = 1
