@@ -9,13 +9,22 @@ import sys
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
+from typing import Literal
 
-from scripts.freqtrade_api_client import (
-    ApiClientConfig,
-    fetch_logs,
-    fetch_trades,
-    load_api_config_from_env,
-)
+try:
+    from scripts.freqtrade_api_client import (
+        ApiClientConfig,
+        fetch_logs,
+        fetch_trades,
+        load_api_config_from_env,
+    )
+except ModuleNotFoundError:
+    from freqtrade_api_client import (  # type: ignore
+        ApiClientConfig,
+        fetch_logs,
+        fetch_trades,
+        load_api_config_from_env,
+    )
 
 
 @dataclass(frozen=True)
@@ -33,11 +42,12 @@ class DryRunMetrics:
 class DryRunCriteriaResult:
     """Result of Dry Run criteria evaluation."""
 
+    status: Literal["PASSED", "FAILED", "INCONCLUSIVE"]
     passed: bool
     details: tuple[str, ...]
 
 
-def evaluate_dryrun(metrics: DryRunMetrics) -> DryRunCriteriaResult:
+def evaluate_dryrun(metrics: DryRunMetrics, uptime_reliable: bool = True) -> DryRunCriteriaResult:
     """Evaluate Dry Run metrics against acceptance criteria.
 
     Acceptance criteria:
@@ -55,50 +65,59 @@ def evaluate_dryrun(metrics: DryRunMetrics) -> DryRunCriteriaResult:
 
     """
     details = []
-    passed = True
+    failed_checks = 0
 
     # Check uptime
-    if metrics.uptime_percent >= 99.0:
+    if uptime_reliable and metrics.uptime_percent >= 99.0:
         details.append(f"✓ Uptime: {metrics.uptime_percent:.1f}% (>= 99%)")
-    else:
+    elif uptime_reliable:
         details.append(f"✗ Uptime: {metrics.uptime_percent:.1f}% (< 99%)")
-        passed = False
+        failed_checks += 1
+    else:
+        details.append("! Uptime: unavailable (API logs required for strict evaluation)")
 
     # Check API error rate
     if metrics.api_error_rate < 1.0:
         details.append(f"✓ API error rate: {metrics.api_error_rate:.2f}% (< 1%)")
     else:
         details.append(f"✗ API error rate: {metrics.api_error_rate:.2f}% (>= 1%)")
-        passed = False
+        failed_checks += 1
 
     # Check order accuracy
     if metrics.order_accuracy >= 98.0:
         details.append(f"✓ Order accuracy: {metrics.order_accuracy:.1f}% (>= 98%)")
     else:
         details.append(f"✗ Order accuracy: {metrics.order_accuracy:.1f}% (< 98%)")
-        passed = False
+        failed_checks += 1
 
     # Check Sharpe deviation
     if metrics.sharpe_deviation <= 0.3:
         details.append(f"✓ Sharpe deviation: {metrics.sharpe_deviation:.2f} (<= 0.3)")
     else:
         details.append(f"✗ Sharpe deviation: {metrics.sharpe_deviation:.2f} (> 0.3)")
-        passed = False
+        failed_checks += 1
 
     # Check days running
     if metrics.days_running >= 14:
         details.append(f"✓ Running period: {metrics.days_running} days (>= 14 days)")
     else:
         details.append(f"✗ Running period: {metrics.days_running} days (< 14 days)")
-        passed = False
+        failed_checks += 1
 
-    # Add overall result
-    if passed:
+    passed = False
+    if failed_checks > 0:
+        status = "FAILED"
+        details.append("\n✗ Dry Run FAILED - Continue monitoring")
+    elif uptime_reliable:
+        status = "PASSED"
+        passed = True
         details.append("\n✓ Dry Run PASSED - Ready for backtest")
     else:
-        details.append("\n✗ Dry Run FAILED - Continue monitoring")
+        status = "INCONCLUSIVE"
+        details.append("\n! Dry Run INCONCLUSIVE - Re-run with API metrics to finalize")
 
     return DryRunCriteriaResult(
+        status=status,
         passed=passed,
         details=tuple(details),
     )
@@ -253,8 +272,8 @@ def find_database_path(project_root: str) -> str | None:
 
     Search order:
     1. ``db_url`` key in ``{project_root}/user_data/config/config.json``
-    2. ``{project_root}/tradesv3.dryrun.sqlite`` (size > 0)
-    3. ``{project_root}/user_data/tradesv3.dryrun.sqlite`` (size > 0)
+    2. ``{project_root}/user_data/tradesv3.dryrun.sqlite`` (size > 0)
+    3. ``{project_root}/tradesv3.dryrun.sqlite`` (size > 0)
 
     Args:
         project_root: Absolute path to the project root.
@@ -277,15 +296,15 @@ def find_database_path(project_root: str) -> str | None:
         except (json.JSONDecodeError, OSError):
             pass
 
-    # 2. Project root
-    root_db = Path(project_root) / "tradesv3.dryrun.sqlite"
-    if root_db.is_file() and root_db.stat().st_size > 0:
-        return str(root_db)
-
-    # 3. user_data dir
+    # 2. user_data dir
     user_data_db = Path(project_root) / "user_data" / "tradesv3.dryrun.sqlite"
     if user_data_db.is_file() and user_data_db.stat().st_size > 0:
         return str(user_data_db)
+
+    # 3. Project root
+    root_db = Path(project_root) / "tradesv3.dryrun.sqlite"
+    if root_db.is_file() and root_db.stat().st_size > 0:
+        return str(root_db)
 
     return None
 
@@ -352,8 +371,9 @@ def collect_metrics_from_db(db_path: str, log_path: str | None = None) -> DryRun
     """Collect Dry Run metrics by reading the SQLite database directly.
 
     Falls back to this approach when the REST API is unavailable.
-    ``uptime_percent`` is set to a fixed estimate of 95.0 because
-    precise uptime cannot be derived from the database alone.
+    Uptime cannot be derived reliably from DB-only data, so
+    ``uptime_percent`` is returned as 0.0 and evaluated as
+    "unavailable" by the caller.
 
     Args:
         db_path: Path to the Freqtrade SQLite database.
@@ -378,8 +398,8 @@ def collect_metrics_from_db(db_path: str, log_path: str | None = None) -> DryRun
         if conn is not None:
             conn.close()
 
-    # Uptime: fixed estimate (cannot derive from DB)
-    uptime = 95.0
+    # Uptime: unavailable in DB fallback mode.
+    uptime = 0.0
 
     # API error rate from log file
     api_error_rate = 0.0
@@ -423,11 +443,14 @@ def main() -> int:
     metrics = collect_metrics_from_api(api_config)
     source = "API"
 
+    db_path_used: str | None = None
+
     if metrics is None:
         print("API connection failed, falling back to database...")
         project_root = str(Path(__file__).resolve().parent.parent)
         db_path = find_database_path(project_root)
         if db_path:
+            db_path_used = db_path
             log_path = next(
                 Path(project_root, "user_data", "logs").glob("freqtrade*.log"),
                 None,
@@ -440,13 +463,19 @@ def main() -> int:
         return 2
 
     print(f"Data source: {source}")
+    if db_path_used:
+        print(f"Database path: {db_path_used}")
     print()
 
-    result = evaluate_dryrun(metrics)
+    result = evaluate_dryrun(metrics, uptime_reliable=(source == "API"))
     for detail in result.details:
         print(detail)
 
-    return 0 if result.passed else 1
+    if result.status == "PASSED":
+        return 0
+    if result.status == "FAILED":
+        return 1
+    return 3
 
 
 if __name__ == "__main__":

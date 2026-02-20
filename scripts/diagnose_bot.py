@@ -18,11 +18,18 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from scripts.freqtrade_api_client import (
-    ApiClientConfig,
-    fetch_ping,
-    load_api_config_from_env,
-)
+try:
+    from scripts.freqtrade_api_client import (
+        ApiClientConfig,
+        fetch_ping,
+        load_api_config_from_env,
+    )
+except ModuleNotFoundError:
+    from freqtrade_api_client import (  # type: ignore
+        ApiClientConfig,
+        fetch_ping,
+        load_api_config_from_env,
+    )
 
 
 @dataclass(frozen=True)
@@ -82,7 +89,7 @@ def check_api_server(config: ApiClientConfig) -> DiagnosticResult:
         return DiagnosticResult(
             name="api_server",
             status="ERROR",
-            message=f"API server unreachable: {resp.error}",
+            message=f"API server unreachable (connection failed or blocked): {resp.error}",
         )
     except Exception as exc:
         return DiagnosticResult(
@@ -201,6 +208,49 @@ def check_env_variables(env_vars: dict | None = None) -> DiagnosticResult:
     )
 
 
+def _load_dotenv(project_root: str) -> dict[str, str]:
+    """Load .env values from project root without mutating process env."""
+    env_path = Path(project_root) / ".env"
+    if not env_path.exists():
+        return {}
+
+    loaded: dict[str, str] = {}
+    try:
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, value = stripped.split("=", 1)
+            loaded[key.strip()] = value.strip().strip('"').strip("'")
+    except OSError:
+        return {}
+    return loaded
+
+
+def _resolve_log_path(project_root: str) -> str:
+    """Resolve newest freqtrade log path, with fallback for compatibility."""
+    log_dir = Path(project_root) / "user_data" / "logs"
+    if log_dir.exists():
+        candidates = sorted(
+            log_dir.glob("freqtrade*.log"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if candidates:
+            return str(candidates[0])
+    return str(log_dir / "freqtrade.log")
+
+
+def _resolve_db_path(project_root: str) -> str:
+    """Resolve DB path, preferring user_data to avoid stale root DB reads."""
+    user_data_db = Path(project_root) / "user_data" / "tradesv3.dryrun.sqlite"
+    root_db = Path(project_root) / "tradesv3.dryrun.sqlite"
+
+    if user_data_db.exists() and user_data_db.stat().st_size > 0:
+        return str(user_data_db)
+    return str(root_db)
+
+
 def check_telegram_token(env_vars: dict | None = None) -> DiagnosticResult:
     """Validate Telegram token format."""
     if env_vars is None:
@@ -231,7 +281,7 @@ def check_telegram_token(env_vars: dict | None = None) -> DiagnosticResult:
 
 
 def check_db_path_consistency(project_root: str) -> DiagnosticResult:
-    """Check for ghost database files (0-byte in user_data, real data in root)."""
+    """Check for stale/ghost DB path inconsistencies between root and user_data."""
     user_data_db = Path(project_root) / "user_data" / "tradesv3.dryrun.sqlite"
     root_db = Path(project_root) / "tradesv3.dryrun.sqlite"
 
@@ -250,6 +300,36 @@ def check_db_path_consistency(project_root: str) -> DiagnosticResult:
                     f"but {root_db} has {root_size} bytes"
                 ),
             )
+
+    # Both files exist and hold different trade snapshots -> stale read risk.
+    if user_data_exists and root_exists and user_data_db.stat().st_size > 0 and root_db.stat().st_size > 0:
+        try:
+            uconn = sqlite3.connect(str(user_data_db))
+            rconn = sqlite3.connect(str(root_db))
+            try:
+                ucur = uconn.cursor()
+                rcur = rconn.cursor()
+                u_stats = ucur.execute(
+                    "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM trades"
+                ).fetchone()
+                r_stats = rcur.execute(
+                    "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM trades"
+                ).fetchone()
+            finally:
+                uconn.close()
+                rconn.close()
+
+            if u_stats != r_stats:
+                return DiagnosticResult(
+                    name="db_path_consistency",
+                    status="WARNING",
+                    message=(
+                        "Root/user_data DB snapshots differ. "
+                        f"user_data={u_stats}, root={r_stats}"
+                    ),
+                )
+        except Exception:
+            pass
 
     return DiagnosticResult(
         name="db_path_consistency",
@@ -322,18 +402,20 @@ def check_open_trades(db_path: str) -> DiagnosticResult:
 # ---------------------------------------------------------------------------
 
 
-def run_all_diagnostics(project_root: str, api_config: ApiClientConfig) -> DiagnosticReport:
+def run_all_diagnostics(
+    project_root: str, api_config: ApiClientConfig, env_vars: dict | None = None
+) -> DiagnosticReport:
     """Run all diagnostic checks and produce an aggregated report."""
-    db_path = str(Path(project_root) / "tradesv3.dryrun.sqlite")
-    log_path = str(Path(project_root) / "user_data" / "logs" / "freqtrade_bot.log")
+    db_path = _resolve_db_path(project_root)
+    log_path = _resolve_log_path(project_root)
 
     results = [
         check_process_running(),
         check_api_server(api_config),
         check_database(db_path),
         check_log_freshness(log_path),
-        check_env_variables(),
-        check_telegram_token(),
+        check_env_variables(env_vars),
+        check_telegram_token(env_vars),
         check_db_path_consistency(project_root),
         check_open_trades(db_path),
     ]
@@ -377,8 +459,11 @@ def main() -> int:
     """Run diagnostics and print report. Returns exit code."""
     project_root = str(Path(__file__).resolve().parent.parent)
 
+    merged_env = dict(os.environ)
+    merged_env = {**_load_dotenv(project_root), **merged_env}
+
     try:
-        api_config = load_api_config_from_env()
+        api_config = load_api_config_from_env(merged_env)
     except Exception:
         api_config = ApiClientConfig(
             base_url="http://127.0.0.1:8081",
@@ -386,7 +471,7 @@ def main() -> int:
             password="",
         )
 
-    report = run_all_diagnostics(project_root, api_config)
+    report = run_all_diagnostics(project_root, api_config, env_vars=merged_env)
     output = format_diagnostic_report(report)
     print(output)
 

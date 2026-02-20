@@ -6,14 +6,24 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from scripts.freqtrade_api_client import (
-    ApiClientConfig,
-    fetch_logs,
-    fetch_profit,
-    fetch_status,
-    fetch_trades,
-    load_api_config_from_env,
-)
+try:
+    from scripts.freqtrade_api_client import (
+        ApiClientConfig,
+        fetch_logs,
+        fetch_profit,
+        fetch_status,
+        fetch_trades,
+        load_api_config_from_env,
+    )
+except ModuleNotFoundError:
+    from freqtrade_api_client import (  # type: ignore
+        ApiClientConfig,
+        fetch_logs,
+        fetch_profit,
+        fetch_status,
+        fetch_trades,
+        load_api_config_from_env,
+    )
 
 
 @dataclass(frozen=True)
@@ -64,7 +74,7 @@ def format_daily_report(metrics: DailyMetrics) -> str:
         f"  Total Trades:     {metrics.total_trades}",
         f"  Open Positions:   {metrics.open_positions}",
         "",
-        "PROFIT & LOSS (JPY)",
+        "PROFIT & LOSS",
         f"  Daily P&L:        {daily_pnl_str}",
         f"  Cumulative P&L:   {cumulative_pnl_str}",
         "",
@@ -261,19 +271,22 @@ def main() -> int:
     metrics = collect_daily_metrics_from_api(api_config, report_date)
     source = "API"
 
+    db_path_used: str | None = None
+
     if metrics is None:
         print("API connection failed, falling back to database...")
         project_root = str(Path(__file__).resolve().parent.parent)
         # DB path detection
         db_path = None
-        root_db = Path(project_root) / "tradesv3.dryrun.sqlite"
         userdata_db = Path(project_root) / "user_data" / "tradesv3.dryrun.sqlite"
-        if root_db.exists() and root_db.stat().st_size > 0:
-            db_path = str(root_db)
-        elif userdata_db.exists() and userdata_db.stat().st_size > 0:
+        root_db = Path(project_root) / "tradesv3.dryrun.sqlite"
+        if userdata_db.exists() and userdata_db.stat().st_size > 0:
             db_path = str(userdata_db)
+        elif root_db.exists() and root_db.stat().st_size > 0:
+            db_path = str(root_db)
 
         if db_path:
+            db_path_used = db_path
             log_path = None
             log_dir = Path(project_root) / "user_data" / "logs"
             if log_dir.exists():
@@ -292,6 +305,8 @@ def main() -> int:
         return 2
 
     print(f"\nData source: {source}\n")
+    if db_path_used:
+        print(f"Database path: {db_path_used}\n")
 
     report = format_daily_report(metrics)
     print(report)

@@ -1,0 +1,69 @@
+---
+version: '3'
+services:
+  freqtrade:
+    image: freqtradeorg/freqtrade:stable
+    # image: freqtradeorg/freqtrade:develop
+    # Use plotting image
+    # image: freqtradeorg/freqtrade:stable_plot
+    # Enable GPU Image (only relevant for image tag: stable or develop)
+    # Make sure to uncomment the deploy section
+    # image: freqtradeorg/freqtrade:stable_freqaitorch
+    restart: unless-stopped
+    container_name: freqtrade
+    volumes:
+      - "./user_data:/freqtrade/user_data"
+    # Default command used when running `docker compose up`
+    command: >
+      trade
+      --config /freqtrade/user_data/config/config.dryrun.safe.json
+      --strategy DCAStrategyBalanced
+    # Expose api on port 8080 (localhost only)
+    # Please read the https://www.freqtrade.io/en/stable/rest-api/ documentation
+    # for more information.
+    ports:
+      - "127.0.0.1:8081:8081"
+    # Default command used when running `docker compose run --rm`
+    # command: >
+    #   trade
+    #   --logfile /freqtrade/user_data/logs/freqtrade.log
+    #   --db-url sqlite:////freqtrade/user_data/tradesv3.sqlite
+    #   --config /freqtrade/user_data/config/config.json
+    #   --strategy DCAStrategy
+    # Use GPU Resources
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    environment:
+      # Freqtrade config overrides via environment variables
+      - FREQTRADE__TELEGRAM__TOKEN=${FREQTRADE__TELEGRAM__TOKEN}
+      - FREQTRADE__TELEGRAM__CHAT_ID=${FREQTRADE__TELEGRAM__CHAT_ID}
+      - FREQTRADE__API_SERVER__JWT_SECRET_KEY=${FREQTRADE__API_SERVER__JWT_SECRET_KEY}
+      - FREQTRADE__API_SERVER__WS_TOKEN=${FREQTRADE__API_SERVER__WS_TOKEN}
+      - FREQTRADE__API_SERVER__PASSWORD=${FREQTRADE__API_SERVER__PASSWORD}
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - ENVIRONMENT=${ENVIRONMENT:-dry_run}
+    networks:
+      - ft_network
+
+  # Optional: Jupyter Notebook for data analysis
+  # jupyter:
+  #   image: freqtradeorg/freqtrade:stable
+  #   container_name: freqtrade_jupyter
+  #   command: >
+  #     jupyter lab --port=8888 --ip=0.0.0.0 --allow-root
+  #   volumes:
+  #     - "./user_data:/freqtrade/user_data"
+  #   ports:
+  #     - "127.0.0.1:8888:8888"
+  #   networks:
+  #     - ft_network
+
+networks:
+  ft_network:
+    driver: bridge
