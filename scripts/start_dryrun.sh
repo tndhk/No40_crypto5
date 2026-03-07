@@ -49,8 +49,11 @@ fi
 echo ""
 
 # Preflight Check 2: Config validation
-echo "2. Validating config.json..."
-if .venv/bin/python scripts/validate_config.py user_data/config/config.json; then
+SAFE_CONFIG="user_data/config/config.dryrun.safe.json"
+SAFE_STRATEGY="DCAStrategyBalanced"
+
+echo "2. Validating safe config..."
+if .venv/bin/python scripts/validate_config.py "$SAFE_CONFIG"; then
     echo -e "${GREEN}✓ Config validation passed${NC}"
 else
     echo -e "${RED}✗ Config validation failed${NC}"
@@ -81,7 +84,7 @@ echo ""
 
 # Preflight Check 5: Strategy file check
 echo "5. Checking strategy file..."
-STRATEGY_FILE="user_data/strategies/dca_strategy.py"
+STRATEGY_FILE="user_data/strategies/dca_strategy_balanced.py"
 if [[ -f "$STRATEGY_FILE" ]]; then
     echo -e "${GREEN}✓ Strategy file found: $STRATEGY_FILE${NC}"
 else
@@ -103,9 +106,9 @@ echo "========================================"
 echo "Starting Dry Run..."
 echo "========================================"
 echo ""
-echo "Config: user_data/config/config.json"
-echo "Strategy: DCAStrategy"
-echo "Mode: Dry Run (paper trading)"
+echo "Config: $SAFE_CONFIG"
+echo "Strategy: $SAFE_STRATEGY"
+echo "Mode: Dry Run (paper trading, safe profile)"
 echo ""
 echo "Press Ctrl+C to stop the bot"
 echo ""
@@ -114,5 +117,5 @@ echo ""
 
 # Launch Freqtrade
 exec .venv/bin/freqtrade trade \
-    --config user_data/config/config.json \
-    --strategy DCAStrategy
+    --config "$SAFE_CONFIG" \
+    --strategy "$SAFE_STRATEGY"

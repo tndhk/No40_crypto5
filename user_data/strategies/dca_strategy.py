@@ -12,10 +12,16 @@ from freqtrade.persistence import Trade
 from freqtrade.strategy import DecimalParameter, IStrategy
 from pandas import DataFrame
 
-from indicators import calculate_rsi, calculate_volume_sma
-from market_regime import MarketRegime
-from risk_manager import RiskManager
-from slippage_protection import SlippageProtection
+try:
+    from indicators import calculate_rsi, calculate_volume_sma
+    from market_regime import MarketRegime
+    from risk_manager import RiskManager
+    from slippage_protection import SlippageProtection
+except ModuleNotFoundError:
+    from .indicators import calculate_rsi, calculate_volume_sma
+    from .market_regime import MarketRegime
+    from .risk_manager import RiskManager
+    from .slippage_protection import SlippageProtection
 
 
 class DCAStrategy(IStrategy):
@@ -68,6 +74,10 @@ class DCAStrategy(IStrategy):
     position_adjustment_enable = True
     max_entry_position_adjustment = 3  # 最大3回のDCA
 
+    custom_info = {
+        'volatility_threshold': 0.035,
+    }
+
     @property
     def protections(self):
         """
@@ -110,11 +120,16 @@ class DCAStrategy(IStrategy):
             daily_loss_limit=config.get('daily_loss_limit', 0.05),
             circuit_breaker_drawdown=config.get('circuit_breaker_drawdown', 0.15),
             max_consecutive_losses=config.get('max_consecutive_losses', 3),
-            cooldown_hours=config.get('cooldown_hours', 24)
+            cooldown_hours=config.get('cooldown_hours', 12)
         )
 
         # 期待エントリー価格の記録用
         self.expected_entry_price = {}
+        self.starting_balance = float(
+            config.get('dry_run_wallet', config.get('available_capital', 0)) or 0
+        )
+        if self.starting_balance > 0:
+            self.risk_manager.update_balance(self.starting_balance)
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """
@@ -137,6 +152,9 @@ class DCAStrategy(IStrategy):
 
         # 市場環境判定指標を追加
         dataframe = self.market_regime.add_regime_indicators(dataframe)
+        dataframe['volatility_ratio'] = (
+            (dataframe['high'] - dataframe['low']) / dataframe['close']
+        ).fillna(0.0)
 
         return dataframe
 
@@ -222,17 +240,14 @@ class DCAStrategy(IStrategy):
         Returns:
             カスタムステーク額（上限超過の場合None）
         """
-        # DCAエントリーの場合は1.5倍のステーク
         stake_amount = proposed_stake
-        if entry_tag and entry_tag.startswith('dca_'):
-            stake_amount = proposed_stake * 1.5
 
         # ポジションサイズ上限チェック
         if not self.risk_manager.check_position_size(stake_amount):
             return None
 
         # ポートフォリオ配分上限チェック
-        wallet_balance = kwargs.get('wallet_balance', 0)
+        wallet_balance = self._extract_wallet_balance(kwargs)
         if wallet_balance > 0:
             if not self.risk_manager.check_portfolio_limit(stake_amount, wallet_balance):
                 return None
@@ -275,39 +290,6 @@ class DCAStrategy(IStrategy):
         Returns:
             追加購入額（なしの場合None）
         """
-        if not trade:
-            return None
-
-        # クールダウン期間中はDCAをブロック
-        if not self.risk_manager.check_cooldown(current_time):
-            return None
-
-        # 部分利確チェック（利益が閾値を超えた場合）
-        if current_profit >= self.take_profit_threshold.value:
-            # 負の値を返すことで部分売却を指示
-            # stake_amount * sell_ratioを売却
-            sell_amount = trade.stake_amount * self.take_profit_sell_ratio.value
-            return -sell_amount
-
-        # 利益が出ている場合はDCAなし
-        if current_profit > 0:
-            return None
-
-        # DCA閾値チェック
-        filled_entries = trade.nr_of_successful_entries
-
-        if filled_entries == 1 and current_profit <= self.dca_threshold_1.value:
-            # 1回目のDCA
-            return max_stake * 0.5
-
-        if filled_entries == 2 and current_profit <= self.dca_threshold_2.value:
-            # 2回目のDCA
-            return max_stake * 0.5
-
-        if filled_entries == 3 and current_profit <= self.dca_threshold_3.value:
-            # 3回目のDCA
-            return max_stake * 0.5
-
         return None
 
     def confirm_trade_entry(
@@ -339,8 +321,26 @@ class DCAStrategy(IStrategy):
         Returns:
             True: 注文許可, False: 注文拒否
         """
+        wallet_balance = self._extract_wallet_balance(kwargs)
+        if wallet_balance > 0:
+            self.risk_manager.update_balance(wallet_balance)
+
         # 連続損失上限チェック
         if not self.risk_manager.check_consecutive_losses():
+            return False
+
+        if not self.risk_manager.check_cooldown(current_time):
+            return False
+
+        if self.starting_balance > 0:
+            if not self.risk_manager.check_daily_loss_limit_tracked(
+                current_time, self.starting_balance
+            ):
+                return False
+
+        if wallet_balance > 0 and not self.risk_manager.check_circuit_breaker_tracked(
+            wallet_balance
+        ):
             return False
 
         # 期待価格が記録されている場合のみスリッページチェック
@@ -390,8 +390,16 @@ class DCAStrategy(IStrategy):
         is_loss = current_profit < 0
         self.risk_manager.record_trade_result(is_loss)
 
-        # ストップロスの場合はクールダウンをトリガー
-        if exit_reason == 'stop_loss' or (is_loss and current_profit <= self.stoploss):
+        if is_loss:
+            loss_amount = abs(current_profit) * trade.stake_amount
+            self.risk_manager.record_daily_loss(loss_amount, current_time)
+
+        wallet_balance = self._extract_wallet_balance(kwargs)
+        if wallet_balance > 0:
+            self.risk_manager.update_balance(wallet_balance)
+
+        # 損失トレード後はクールダウンをトリガー
+        if is_loss or exit_reason == 'stop_loss' or current_profit <= self.stoploss:
             self.risk_manager.trigger_cooldown(current_time)
 
         return True
@@ -419,5 +427,38 @@ class DCAStrategy(IStrategy):
         Returns:
             エグジット理由（なしの場合None）
         """
-        # カスタムエグジット条件はなし（Freqtradeのデフォルトロジックを使用）
+        current_candle = self._get_current_candle(pair)
+        if current_candle is None:
+            return None
+
+        ema_50 = current_candle.get('ema_50')
+        close = current_candle.get('close')
+        if ema_50 is None or close is None:
+            return None
+
+        if close < ema_50 and current_profit < 0:
+            return 'trend_loss_exit'
+
         return None
+
+    def _extract_wallet_balance(self, kwargs: dict) -> float:
+        """kwargsから利用可能な残高を抽出する。"""
+        for key in ('wallet_balance', 'available_balance', 'total_wallet_balance'):
+            value = kwargs.get(key)
+            if isinstance(value, (int, float)) and value > 0:
+                return float(value)
+        return 0.0
+
+    def _get_current_candle(self, pair: str) -> Optional[dict]:
+        """最新の分析済みローソクを取得する。"""
+        if not getattr(self, 'dp', None):
+            return None
+
+        try:
+            dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+        except Exception:
+            return None
+
+        if dataframe is None or dataframe.empty:
+            return None
+        return dataframe.iloc[-1].to_dict()

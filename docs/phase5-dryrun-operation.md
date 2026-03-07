@@ -1,7 +1,7 @@
 # Phase 5: Dry Run 運用手順（Docker運用）
 
 開始日: 2026-01-30
-更新日: 2026-02-20
+更新日: 2026-03-07
 
 ## 事前準備
 
@@ -22,6 +22,8 @@ docker ps --filter name=freqtrade
 - モード: `dry_run: true`
 - 1トレードあたり: `stake_amount = 100 USDT`
 - 同時建玉上限: `max_open_trades = 2`
+- クールダウン: `12 hours` after any losing trade
+- DCA: disabled for the current recovery profile
 - 取引ペア: 6ペア（BTC/USDT, ETH/USDT, SOL/USDT, XRP/USDT, DOGE/USDT, ADA/USDT）
 
 ---
@@ -112,6 +114,8 @@ curl -sS -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8081/api/v1/logs?li
 - 勝率
 - 実現損益
 - 最大ドローダウン
+- `stop_loss` 比率
+- 1トレード平均損益
 
 ---
 

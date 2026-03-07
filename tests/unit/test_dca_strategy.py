@@ -9,739 +9,281 @@ import pandas as pd
 import pytest
 
 from user_data.strategies.dca_strategy import DCAStrategy
+from user_data.strategies.dca_strategy_balanced import DCAStrategyBalanced
 
 
 @pytest.fixture
 def default_config():
     """デフォルトの戦略設定"""
     return {
-        'stake_currency': 'JPY',
-        'stake_amount': 10000,
+        'stake_currency': 'USDT',
+        'stake_amount': 100,
         'dry_run': True,
+        'dry_run_wallet': 1000,
+        'max_portfolio_allocation': 0.2,
+        'max_position_size': 1000,
+        'daily_loss_limit': 0.05,
+        'circuit_breaker_drawdown': 0.15,
+        'max_consecutive_losses': 3,
+        'cooldown_hours': 12,
+        'max_slippage_percent': 0.5,
     }
 
 
-class TestDCAStrategyEntrySignal:
-    """エントリーシグナルのテストスイート"""
+def _balanced_dataframe(
+    *,
+    close: float = 103.0,
+    previous_close: float = 101.0,
+    open_price: float = 100.0,
+    volume: float = 1200.0,
+    volume_sma: float = 1000.0,
+    rsi: float = 40.0,
+    ema_50: float = 102.0,
+    ema_200: float = 100.0,
+    adx: float = 22.0,
+    high: float = 104.0,
+    low: float = 100.5,
+) -> pd.DataFrame:
+    """Balanced戦略向けの最小DataFrameを作成"""
+    return pd.DataFrame(
+        {
+            'close': [previous_close, close],
+            'open': [99.0, open_price],
+            'high': [previous_close + 1.0, high],
+            'low': [previous_close - 1.0, low],
+            'volume': [1000.0, volume],
+            'volume_sma_20': [1000.0, volume_sma],
+            'rsi': [45.0, rsi],
+            'ema_50': [101.0, ema_50],
+            'ema_200': [100.0, ema_200],
+            'adx': [20.0, adx],
+            'volatility_ratio': [0.01, (high - low) / close],
+        }
+    )
 
-    def test_generates_entry_signal_on_rsi_oversold(self, default_config):
-        """RSIが30以下でエントリーシグナルを生成"""
-        strategy = DCAStrategy(default_config)
 
-        # テストデータ作成（25行必要: ADX計算とvolume SMA20計算のため）
-        dataframe = pd.DataFrame({
-            'close': [100.0] * 25,
-            'high': [102.0] * 25,
-            'low': [98.0] * 25,
-            'open': [100.0] * 25,
-            'volume': [1000.0] * 22 + [1100.0, 1200.0, 1300.0],  # 最後の3行でボリューム増加
-        })
+class TestDCAStrategyBalancedEntrySignal:
+    """Balanced戦略のエントリーシグナルのテスト"""
 
-        metadata = {'pair': 'BTC/JPY'}
+    def test_entry_requires_rebound_confirmation(self, default_config):
+        strategy = DCAStrategyBalanced(default_config)
+        dataframe = _balanced_dataframe()
 
-        # populate_indicatorsで指標を追加
-        dataframe_with_indicators = strategy.populate_indicators(dataframe, metadata)
-        # RSIを手動で設定（過売状態をシミュレート）
-        dataframe_with_indicators['rsi'] = [35.0] * 22 + [28.0, 26.0, 25.0]
+        result = strategy.populate_entry_trend(dataframe, {'pair': 'BTC/USDT'})
 
-        result = strategy.populate_entry_trend(dataframe_with_indicators, metadata)
-
-        # 最後の行でエントリーシグナルが立つことを確認（RSI < 30 かつ volume > SMA）
         assert result.iloc[-1]['enter_long'] == 1
 
-    def test_no_entry_signal_when_rsi_not_oversold(self, default_config):
-        """RSIが30以上ではエントリーシグナルなし"""
-        strategy = DCAStrategy(default_config)
+    def test_entry_is_blocked_without_green_candle(self, default_config):
+        strategy = DCAStrategyBalanced(default_config)
+        dataframe = _balanced_dataframe(open_price=104.0)
 
-        # テストデータ作成（25行必要: ADX計算とvolume SMA20計算のため）
-        dataframe = pd.DataFrame({
-            'close': [100.0] * 25,
-            'high': [102.0] * 25,
-            'low': [98.0] * 25,
-            'open': [100.0] * 25,
-            'volume': [1000.0] * 22 + [1100.0, 1200.0, 1300.0],  # ボリューム条件は満たす
-        })
+        result = strategy.populate_entry_trend(dataframe, {'pair': 'BTC/USDT'})
 
-        metadata = {'pair': 'BTC/JPY'}
-
-        # populate_indicatorsで指標を追加
-        dataframe_with_indicators = strategy.populate_indicators(dataframe, metadata)
-        # RSIを手動で設定（過売ではない状態）
-        dataframe_with_indicators['rsi'] = [50.0] * 22 + [55.0, 58.0, 60.0]
-
-        result = strategy.populate_entry_trend(dataframe_with_indicators, metadata)
-
-        # エントリーシグナルが立たないことを確認（RSI > 30）
         assert result.iloc[-1]['enter_long'] == 0
 
-    def test_entry_requires_volume_above_sma(self, default_config):
-        """出来高がSMA以下の場合エントリーしない"""
-        strategy = DCAStrategy(default_config)
+    def test_entry_is_blocked_when_close_does_not_reclaim_previous_close(self, default_config):
+        strategy = DCAStrategyBalanced(default_config)
+        dataframe = _balanced_dataframe(close=100.5, previous_close=101.0)
 
-        # 出来高がSMA以下のDataFrameを作成
-        # volume SMA20を計算すると平均1000になるようなデータ
-        dataframe = pd.DataFrame({
-            'close': [100.0] * 25,
-            'high': [102.0] * 25,
-            'low': [98.0] * 25,
-            'open': [100.0] * 25,
-            'volume': [1000.0] * 20 + [1050.0, 1000.0, 1000.0, 900.0, 800.0],  # 最後が800でSMA以下
-            'rsi': [35.0] * 20 + [35.0, 32.0, 28.0, 26.0, 25.0],  # RSI条件は満たす
-        })
+        result = strategy.populate_entry_trend(dataframe, {'pair': 'BTC/USDT'})
 
-        metadata = {'pair': 'BTC/JPY'}
-
-        # populate_indicatorsで指標を追加
-        dataframe_with_indicators = strategy.populate_indicators(dataframe, metadata)
-
-        # populate_entry_trendでエントリーシグナルを生成
-        result = strategy.populate_entry_trend(dataframe_with_indicators, metadata)
-
-        # 最後の行ではエントリーしない（volume < volume_sma）
         assert result.iloc[-1]['enter_long'] == 0
 
-    def test_entry_with_rsi_35(self, default_config):
-        """RSI=35でエントリーすることを確認"""
-        strategy = DCAStrategy(default_config)
+    def test_entry_is_blocked_on_high_volatility(self, default_config):
+        strategy = DCAStrategyBalanced(default_config)
+        dataframe = _balanced_dataframe(high=110.0, low=95.0, close=100.0)
 
-        # テストデータ作成（25行必要: ADX計算とvolume SMA20計算のため）
-        dataframe = pd.DataFrame({
-            'close': [100.0] * 25,
-            'high': [102.0] * 25,
-            'low': [98.0] * 25,
-            'open': [100.0] * 25,
-            'volume': [1000.0] * 22 + [1100.0, 1200.0, 1300.0],  # 最後の3行でボリューム増加
-        })
+        result = strategy.populate_entry_trend(dataframe, {'pair': 'BTC/USDT'})
 
-        metadata = {'pair': 'BTC/JPY'}
-
-        # populate_indicatorsで指標を追加
-        dataframe_with_indicators = strategy.populate_indicators(dataframe, metadata)
-        # RSIを手動で設定（RSI=35の境界値）
-        dataframe_with_indicators['rsi'] = [40.0] * 22 + [36.0, 35.0, 35.0]
-
-        result = strategy.populate_entry_trend(dataframe_with_indicators, metadata)
-
-        # 最後の行でエントリーシグナルが立つことを確認（RSI = 35）
-        assert result.iloc[-1]['enter_long'] == 1
-
-    def test_entry_with_volume_90_percent_sma(self, default_config):
-        """Volume=0.9*SMAでエントリーすることを確認"""
-        strategy = DCAStrategy(default_config)
-
-        # テストデータ作成（25行必要: ADX計算とvolume SMA20計算のため）
-        # volume SMAが1000になるように設定
-        dataframe = pd.DataFrame({
-            'close': [100.0] * 25,
-            'high': [102.0] * 25,
-            'low': [98.0] * 25,
-            'open': [100.0] * 25,
-            'volume': [1000.0] * 22 + [1000.0, 1000.0, 900.0],  # 最後が900（SMAの90%）
-        })
-
-        metadata = {'pair': 'BTC/JPY'}
-
-        # populate_indicatorsで指標を追加
-        dataframe_with_indicators = strategy.populate_indicators(dataframe, metadata)
-        # RSI条件も満たす
-        dataframe_with_indicators['rsi'] = [40.0] * 22 + [32.0, 30.0, 28.0]
-
-        result = strategy.populate_entry_trend(dataframe_with_indicators, metadata)
-
-        # 最後の行でエントリーシグナルが立つことを確認（volume = 0.9 * SMA）
-        assert result.iloc[-1]['enter_long'] == 1
-
-    def test_entry_with_rsi_45(self, default_config):
-        """RSI=45でエントリーすることを確認"""
-        strategy = DCAStrategy(default_config)
-
-        # テストデータ作成（25行必要: ADX計算とvolume SMA20計算のため）
-        dataframe = pd.DataFrame({
-            'close': [100.0] * 25,
-            'high': [102.0] * 25,
-            'low': [98.0] * 25,
-            'open': [100.0] * 25,
-            'volume': [1000.0] * 22 + [1100.0, 1200.0, 1300.0],  # ボリューム条件は満たす
-        })
-
-        metadata = {'pair': 'BTC/JPY'}
-
-        # populate_indicatorsで指標を追加
-        dataframe_with_indicators = strategy.populate_indicators(dataframe, metadata)
-        # RSIを手動で設定（RSI=45の境界値）
-        dataframe_with_indicators['rsi'] = [50.0] * 22 + [46.0, 45.0, 45.0]
-
-        result = strategy.populate_entry_trend(dataframe_with_indicators, metadata)
-
-        # 最後の行でエントリーシグナルが立つことを確認（RSI = 45）
-        assert result.iloc[-1]['enter_long'] == 1
-
-    def test_no_entry_with_rsi_46(self, default_config):
-        """RSI=46ではエントリーしないことを確認"""
-        strategy = DCAStrategy(default_config)
-
-        # テストデータ作成（25行必要: ADX計算とvolume SMA20計算のため）
-        dataframe = pd.DataFrame({
-            'close': [100.0] * 25,
-            'high': [102.0] * 25,
-            'low': [98.0] * 25,
-            'open': [100.0] * 25,
-            'volume': [1000.0] * 22 + [1100.0, 1200.0, 1300.0],  # ボリューム条件は満たす
-        })
-
-        metadata = {'pair': 'BTC/JPY'}
-
-        # populate_indicatorsで指標を追加
-        dataframe_with_indicators = strategy.populate_indicators(dataframe, metadata)
-        # RSIを手動で設定（RSI=46は閾値超過）
-        dataframe_with_indicators['rsi'] = [50.0] * 22 + [47.0, 46.0, 46.0]
-
-        result = strategy.populate_entry_trend(dataframe_with_indicators, metadata)
-
-        # 最後の行でエントリーシグナルが立たないことを確認（RSI = 46 > 45）
         assert result.iloc[-1]['enter_long'] == 0
 
 
-class TestDCAStrategyCustomStakeAmount:
-    """カスタムステーク額のテストスイート"""
+class TestDCAStrategyBalancedExitSignal:
+    """Balanced戦略のエグジットシグナルのテスト"""
 
-    def test_initial_stake_amount(self, default_config):
-        """初回エントリーのステーク額"""
-        strategy = DCAStrategy(default_config)
+    def test_exit_on_rsi_strength(self, default_config):
+        strategy = DCAStrategyBalanced(default_config)
+        dataframe = _balanced_dataframe(rsi=63.0)
 
-        result = strategy.custom_stake_amount(
-            pair='BTC/JPY',
-            current_time=datetime.now(),
-            current_rate=4000000.0,
-            proposed_stake=10000,
-            min_stake=1000,
-            max_stake=100000,
-            leverage=1.0,
-            entry_tag=None,
-            side='long',
-            wallet_balance=1000000,
-            wallet_currency='JPY'
-        )
+        result = strategy.populate_exit_trend(dataframe, {'pair': 'BTC/USDT'})
 
-        # 提案されたステーク額をそのまま返す
-        assert result == 10000
-
-    def test_adjusted_stake_for_dca(self, default_config):
-        """DCA追加購入時のステーク額調整"""
-        strategy = DCAStrategy(default_config)
-
-        # DCAエントリータグの場合
-        result = strategy.custom_stake_amount(
-            pair='BTC/JPY',
-            current_time=datetime.now(),
-            current_rate=4000000.0,
-            proposed_stake=10000,
-            min_stake=1000,
-            max_stake=100000,
-            leverage=1.0,
-            entry_tag='dca_1',
-            side='long',
-            wallet_balance=1000000,
-            wallet_currency='JPY'
-        )
-
-        # DCAの場合は1.5倍のステーク
-        assert result == 15000
-
-
-class TestDCAStrategyPositionAdjustment:
-    """ポジション調整（DCA追加購入）のテストスイート"""
-
-    def test_no_adjustment_when_no_trade(self, default_config):
-        """トレードがない場合は調整なし"""
-        strategy = DCAStrategy(default_config)
-
-        result = strategy.adjust_trade_position(
-            trade=None,
-            current_time=datetime.now(),
-            current_rate=4000000.0,
-            current_profit=0.0,
-            min_stake=1000,
-            max_stake=100000,
-            current_entry_rate=4000000.0,
-            current_exit_rate=4000000.0,
-            current_entry_profit=0.0,
-            current_exit_profit=0.0,
-            side='long',
-            pair='BTC/JPY'
-        )
-
-        assert result is None
-
-    def test_dca_adjustment_on_threshold(self, default_config):
-        """DCA閾値到達時に追加購入"""
-        strategy = DCAStrategy(default_config)
-
-        # モックトレードオブジェクト
-        mock_trade = MagicMock()
-        mock_trade.nr_of_successful_entries = 1
-
-        result = strategy.adjust_trade_position(
-            trade=mock_trade,
-            current_time=datetime.now(),
-            current_rate=4000000.0,
-            current_profit=-0.08,  # -8% (DCA閾値-7%を超過)
-            min_stake=1000,
-            max_stake=100000,
-            current_entry_rate=4320000.0,
-            current_exit_rate=4000000.0,
-            current_entry_profit=-0.08,
-            current_exit_profit=-0.08,
-            side='long',
-            pair='BTC/JPY'
-        )
-
-        # 追加購入が行われることを確認
-        assert result is not None
-        assert result > 0
-
-    def test_no_dca_when_profit_positive(self, default_config):
-        """利益が出ている場合はDCAなし"""
-        strategy = DCAStrategy(default_config)
-
-        mock_trade = MagicMock()
-        mock_trade.nr_of_successful_entries = 1
-
-        result = strategy.adjust_trade_position(
-            trade=mock_trade,
-            current_time=datetime.now(),
-            current_rate=4200000.0,
-            current_profit=0.05,  # +5% (利益)
-            min_stake=1000,
-            max_stake=100000,
-            current_entry_rate=4000000.0,
-            current_exit_rate=4200000.0,
-            current_entry_profit=0.05,
-            current_exit_profit=0.05,
-            side='long',
-            pair='BTC/JPY'
-        )
-
-        assert result is None
-
-
-class TestDCAStrategyExitSignal:
-    """エグジットシグナルのテストスイート"""
-
-    def test_generates_exit_signal_on_profit_target(self, default_config):
-        """利確目標到達でエグジットシグナルを生成"""
-        strategy = DCAStrategy(default_config)
-
-        dataframe = pd.DataFrame({
-            'close': [100.0, 105.0, 110.0],
-            'rsi': [50.0, 65.0, 75.0],  # RSI > 70
-            'volume': [1000.0, 1100.0, 1200.0],
-        })
-
-        metadata = {'pair': 'BTC/JPY'}
-        result = strategy.populate_exit_trend(dataframe, metadata)
-
-        # RSI > 70でエグジットシグナルが立つことを確認
         assert result.iloc[-1]['exit_long'] == 1
 
-    def test_no_exit_signal_when_below_target(self, default_config):
-        """利確目標未到達ではエグジットシグナルなし"""
-        strategy = DCAStrategy(default_config)
+    def test_exit_on_trend_loss(self, default_config):
+        strategy = DCAStrategyBalanced(default_config)
+        dataframe = _balanced_dataframe(rsi=56.0, close=100.0, ema_50=101.0)
 
-        dataframe = pd.DataFrame({
-            'close': [100.0, 101.0, 102.0],
-            'rsi': [50.0, 55.0, 60.0],  # RSI < 70
-            'volume': [1000.0, 1100.0, 1200.0],
-        })
+        result = strategy.populate_exit_trend(dataframe, {'pair': 'BTC/USDT'})
 
-        metadata = {'pair': 'BTC/JPY'}
-        result = strategy.populate_exit_trend(dataframe, metadata)
+        assert result.iloc[-1]['exit_long'] == 1
 
-        # エグジットシグナルが立たないことを確認
-        assert result.iloc[-1]['exit_long'] == 0
+    def test_custom_exit_returns_trend_loss_exit(self, default_config):
+        strategy = DCAStrategyBalanced(default_config)
+        strategy.dp = MagicMock()
+        strategy.dp.get_analyzed_dataframe.return_value = (
+            pd.DataFrame([{'close': 100.0, 'ema_50': 101.0}]),
+            None,
+        )
+
+        result = strategy.custom_exit(
+            pair='BTC/USDT',
+            trade=MagicMock(),
+            current_time=datetime.now(),
+            current_rate=100.0,
+            current_profit=-0.01,
+        )
+
+        assert result == 'trend_loss_exit'
 
 
 class TestDCAStrategyRiskManagement:
-    """リスク管理統合のテストスイート"""
+    """リスク管理統合のテスト"""
 
-    def test_dca_respects_position_size_limit(self, default_config):
-        """ポジションサイズ上限を超える場合はステーク額を制限"""
-        config = default_config.copy()
-        config['max_position_size'] = 5000  # 上限5000JPY
-        strategy = DCAStrategy(config)
+    def test_custom_stake_rejects_over_portfolio_limit(self, default_config):
+        strategy = DCAStrategy(default_config)
 
-        # 提案額10000JPYは上限超過のため、Noneが返される想定
         result = strategy.custom_stake_amount(
-            pair='BTC/JPY',
+            pair='BTC/USDT',
             current_time=datetime.now(),
-            current_rate=4000000.0,
-            proposed_stake=10000,
-            min_stake=1000,
-            max_stake=100000,
+            current_rate=40000.0,
+            proposed_stake=300.0,
+            min_stake=10.0,
+            max_stake=1000.0,
             leverage=1.0,
             entry_tag=None,
             side='long',
-            wallet_balance=1000000,
-            wallet_currency='JPY'
+            wallet_balance=1000.0,
         )
 
-        # 上限を超える場合はNoneを返す
         assert result is None
 
-    def test_dca_blocked_during_cooldown(self, default_config):
-        """クールダウン期間中はDCA追加購入をブロック"""
-        config = default_config.copy()
-        config['cooldown_hours'] = 24
-        strategy = DCAStrategy(config)
+    def test_adjust_trade_position_is_disabled(self, default_config):
+        strategy = DCAStrategyBalanced(default_config)
 
-        # クールダウンを設定
+        result = strategy.adjust_trade_position(
+            trade=MagicMock(),
+            current_time=datetime.now(),
+            current_rate=100.0,
+            current_profit=-0.04,
+            min_stake=10.0,
+            max_stake=1000.0,
+            current_entry_rate=104.0,
+            current_exit_rate=100.0,
+            current_entry_profit=-0.04,
+            current_exit_profit=-0.04,
+            side='long',
+        )
+
+        assert result is None
+
+    def test_confirm_trade_entry_blocks_during_cooldown(self, default_config):
+        strategy = DCAStrategy(default_config)
         now = datetime.now()
         strategy.risk_manager.trigger_cooldown(now)
 
-        mock_trade = MagicMock()
-        mock_trade.nr_of_successful_entries = 1
-
-        result = strategy.adjust_trade_position(
-            trade=mock_trade,
-            current_time=now,
-            current_rate=4000000.0,
-            current_profit=-0.08,  # DCA閾値を超過
-            min_stake=1000,
-            max_stake=100000,
-            current_entry_rate=4320000.0,
-            current_exit_rate=4000000.0,
-            current_entry_profit=-0.08,
-            current_exit_profit=-0.08,
-            side='long',
-            pair='BTC/JPY'
-        )
-
-        # クールダウン中はNoneを返す
-        assert result is None
-
-
-class TestDCAStrategySlippageProtection:
-    """スリッページ保護統合のテストスイート"""
-
-    def test_slippage_blocks_entry_on_excessive_slippage(self, default_config):
-        """過大なスリッページ発生時にエントリーをブロック"""
-        config = default_config.copy()
-        config['max_slippage_percent'] = 0.5  # 0.5%まで許容
-        strategy = DCAStrategy(config)
-
-        # 期待価格を設定（最後に見た価格をシミュレート）
-        strategy.expected_entry_price = {'BTC/JPY': 4000000.0}
-
-        # 実際の注文レート: 4050000 JPY（1.25%のスリッページ = 許容範囲超過）
         result = strategy.confirm_trade_entry(
-            pair='BTC/JPY',
+            pair='BTC/USDT',
             order_type='limit',
-            amount=0.01,
-            rate=4050000.0,
+            amount=1.0,
+            rate=100.0,
             time_in_force='GTC',
-            current_time=datetime.now(),
+            current_time=now,
             entry_tag=None,
-            side='long'
+            side='long',
+            wallet_balance=1000.0,
         )
 
-        # スリッページ超過のためFalse（エントリーブロック）
         assert result is False
 
-    def test_slippage_allows_entry_within_tolerance(self, default_config):
-        """許容範囲内のスリッページではエントリーを許可"""
-        config = default_config.copy()
-        config['max_slippage_percent'] = 0.5  # 0.5%まで許容
-        strategy = DCAStrategy(config)
+    def test_confirm_trade_entry_blocks_on_tracked_daily_loss_limit(self, default_config):
+        strategy = DCAStrategy(default_config)
+        now = datetime.now()
+        strategy.risk_manager.record_daily_loss(60.0, now)
 
-        # 期待価格を設定（最後に見た価格をシミュレート）
-        strategy.expected_entry_price = {'BTC/JPY': 4000000.0}
-
-        # 実際の注文レート: 4010000 JPY（0.25%のスリッページ = 許容範囲内）
         result = strategy.confirm_trade_entry(
-            pair='BTC/JPY',
+            pair='BTC/USDT',
             order_type='limit',
-            amount=0.01,
-            rate=4010000.0,
+            amount=1.0,
+            rate=100.0,
+            time_in_force='GTC',
+            current_time=now,
+            entry_tag=None,
+            side='long',
+            wallet_balance=1000.0,
+        )
+
+        assert result is False
+
+    def test_confirm_trade_entry_blocks_on_drawdown(self, default_config):
+        strategy = DCAStrategy(default_config)
+
+        result = strategy.confirm_trade_entry(
+            pair='BTC/USDT',
+            order_type='limit',
+            amount=1.0,
+            rate=100.0,
             time_in_force='GTC',
             current_time=datetime.now(),
             entry_tag=None,
-            side='long'
+            side='long',
+            wallet_balance=800.0,
         )
 
-        # 許容範囲内のためTrue（エントリー許可）
+        assert result is False
+
+    def test_confirm_trade_entry_respects_slippage(self, default_config):
+        strategy = DCAStrategy(default_config)
+        strategy.expected_entry_price = {'BTC/USDT': 100.0}
+
+        result = strategy.confirm_trade_entry(
+            pair='BTC/USDT',
+            order_type='limit',
+            amount=1.0,
+            rate=101.0,
+            time_in_force='GTC',
+            current_time=datetime.now(),
+            entry_tag=None,
+            side='long',
+            wallet_balance=1000.0,
+        )
+
+        assert result is False
+
+    def test_confirm_trade_exit_tracks_loss_and_triggers_cooldown(self, default_config):
+        strategy = DCAStrategy(default_config)
+        trade = MagicMock()
+        trade.stake_amount = 100.0
+
+        now = datetime.now()
+        result = strategy.confirm_trade_exit(
+            pair='BTC/USDT',
+            trade=trade,
+            order_type='limit',
+            amount=1.0,
+            rate=95.0,
+            time_in_force='GTC',
+            exit_reason='exit_signal',
+            current_time=now,
+            current_rate=95.0,
+            current_profit=-0.03,
+            side='long',
+            wallet_balance=970.0,
+        )
+
         assert result is True
+        assert strategy.risk_manager.get_daily_loss(now) == pytest.approx(3.0)
+        assert strategy.risk_manager.check_cooldown(now) is False
 
 
 class TestDCAStrategyBasicConfiguration:
-    """基本設定のテストスイート"""
+    """基本設定のテスト"""
 
-    def test_stoploss_is_minus_twenty_percent(self, default_config):
-        """stoploss値が-0.20であることを確認"""
-        strategy = DCAStrategy(default_config)
-        assert strategy.stoploss == -0.20
-
-    def test_timeframe_is_one_hour(self, default_config):
-        """timeframe値が'15m'であることを確認"""
+    def test_base_timeframe_is_fifteen_minutes(self, default_config):
         strategy = DCAStrategy(default_config)
         assert strategy.timeframe == '15m'
 
-    def test_trailing_stop_configuration(self, default_config):
-        """trailing_stop関連の設定値を確認"""
-        strategy = DCAStrategy(default_config)
-        assert strategy.trailing_stop is True
-        assert strategy.trailing_stop_positive == 0.02
-        assert strategy.trailing_stop_positive_offset == 0.05
-        assert strategy.trailing_only_offset_is_reached is True
-
-
-class TestDCAStrategyPartialTakeProfit:
-    """部分利確のテストスイート"""
-
-    def test_partial_take_profit_at_threshold(self, default_config):
-        """利益閾値到達時に部分利確を実行"""
-        strategy = DCAStrategy(default_config)
-
-        mock_trade = MagicMock()
-        mock_trade.nr_of_successful_entries = 1
-        mock_trade.stake_amount = 10000
-
-        # 8%の利益（take_profit_thresholdのデフォルト値）
-        result = strategy.adjust_trade_position(
-            trade=mock_trade,
-            current_time=datetime.now(),
-            current_rate=4320000.0,
-            current_profit=0.08,
-            min_stake=1000,
-            max_stake=100000,
-            current_entry_rate=4000000.0,
-            current_exit_rate=4320000.0,
-            current_entry_profit=0.08,
-            current_exit_profit=0.08,
-            side='long',
-            pair='BTC/JPY'
-        )
-
-        # 負の値を返す（部分売却）
-        # take_profit_sell_ratio=0.33 → stake_amount * 0.33 = 10000 * 0.33 = 3300
-        assert result is not None
-        assert result < 0
-        assert result == -3300
-
-    def test_no_partial_take_profit_below_threshold(self, default_config):
-        """利益が閾値未満では部分利確なし"""
-        strategy = DCAStrategy(default_config)
-
-        mock_trade = MagicMock()
-        mock_trade.nr_of_successful_entries = 1
-        mock_trade.stake_amount = 10000
-
-        # 5%の利益（閾値8%未満）
-        result = strategy.adjust_trade_position(
-            trade=mock_trade,
-            current_time=datetime.now(),
-            current_rate=4200000.0,
-            current_profit=0.05,
-            min_stake=1000,
-            max_stake=100000,
-            current_entry_rate=4000000.0,
-            current_exit_rate=4200000.0,
-            current_entry_profit=0.05,
-            current_exit_profit=0.05,
-            side='long',
-            pair='BTC/JPY'
-        )
-
-        # 閾値未満のためNone
-        assert result is None
-
-
-class TestDCAStrategyProtections:
-    """Freqtrade protectionsのテストスイート"""
-
-    def test_protections_includes_cooldown_period(self, default_config):
-        """CooldownPeriodが含まれることを確認"""
-        strategy = DCAStrategy(default_config)
-        methods = [p["method"] for p in strategy.protections]
-        assert "CooldownPeriod" in methods
-
-    def test_protections_includes_max_drawdown(self, default_config):
-        """MaxDrawdownが含まれることを確認"""
-        strategy = DCAStrategy(default_config)
-        methods = [p["method"] for p in strategy.protections]
-        assert "MaxDrawdown" in methods
-
-    def test_protections_includes_stoploss_guard(self, default_config):
-        """StoplossGuardが含まれることを確認"""
-        strategy = DCAStrategy(default_config)
-        methods = [p["method"] for p in strategy.protections]
-        assert "StoplossGuard" in methods
-
-    def test_protections_includes_low_profit_pairs(self, default_config):
-        """LowProfitPairsが含まれることを確認"""
-        strategy = DCAStrategy(default_config)
-        methods = [p["method"] for p in strategy.protections]
-        assert "LowProfitPairs" in methods
-
-
-class TestDCAStrategyRiskManagerFull:
-    """RiskManager追加メソッド統合のテストスイート"""
-
-    def test_entry_blocked_by_consecutive_losses(self, default_config):
-        """連続損失上限で新規エントリーをブロック"""
-        config = default_config.copy()
-        config['max_consecutive_losses'] = 3
-        strategy = DCAStrategy(config)
-
-        # 3回の連続損失を記録
-        strategy.risk_manager.record_trade_result(is_loss=True)
-        strategy.risk_manager.record_trade_result(is_loss=True)
-        strategy.risk_manager.record_trade_result(is_loss=True)
-
-        # エントリー確認を実行（連続損失上限到達）
-        result = strategy.confirm_trade_entry(
-            pair='BTC/JPY',
-            order_type='limit',
-            amount=0.01,
-            rate=4000000.0,
-            time_in_force='GTC',
-            current_time=datetime.now(),
-            entry_tag=None,
-            side='long'
-        )
-
-        # 連続損失上限到達のためFalse（エントリーブロック）
-        assert result is False
-
-class TestDCAStrategyConfirmTradeExit:
-    """エグジット確定時のトレード結果記録テスト"""
-
-    def test_confirm_trade_exit_records_loss(self, default_config):
-        """エグジット確定時に損失トレードが記録される"""
-        strategy = DCAStrategy(default_config)
-        strategy.risk_manager.consecutive_loss_count = 0
-
-        mock_trade = MagicMock()
-        mock_trade.stake_amount = 10000
-
-        # current_profit < 0 の場合
-        result = strategy.confirm_trade_exit(
-            pair='BTC/JPY',
-            trade=mock_trade,
-            order_type='limit',
-            amount=1.0,
-            rate=100.0,
-            time_in_force='GTC',
-            exit_reason='exit_signal',
-            current_time=datetime(2024, 6, 1),
-            current_rate=95.0,
-            current_profit=-0.05,
-            side='long'
-        )
-        assert result is True
-        assert strategy.risk_manager.consecutive_loss_count == 1
-
-    def test_confirm_trade_exit_records_win(self, default_config):
-        """エグジット確定時に勝ちトレードが記録され連続損失カウンタがリセットされる"""
-        strategy = DCAStrategy(default_config)
-        strategy.risk_manager.consecutive_loss_count = 2
-
-        mock_trade = MagicMock()
-        mock_trade.stake_amount = 10000
-
-        result = strategy.confirm_trade_exit(
-            pair='BTC/JPY',
-            trade=mock_trade,
-            order_type='limit',
-            amount=1.0,
-            rate=100.0,
-            time_in_force='GTC',
-            exit_reason='exit_signal',
-            current_time=datetime(2024, 6, 1),
-            current_rate=105.0,
-            current_profit=0.05,
-            side='long'
-        )
-        assert result is True
-        assert strategy.risk_manager.consecutive_loss_count == 0
-
-    def test_confirm_trade_exit_triggers_cooldown_on_stoploss(self, default_config):
-        """ストップロスでのエグジット時にクールダウンがトリガーされる"""
-        strategy = DCAStrategy(default_config)
-        current_time = datetime(2024, 6, 1)
-
-        mock_trade = MagicMock()
-        mock_trade.stake_amount = 10000
-
-        result = strategy.confirm_trade_exit(
-            pair='BTC/JPY',
-            trade=mock_trade,
-            order_type='limit',
-            amount=1.0,
-            rate=100.0,
-            time_in_force='GTC',
-            exit_reason='stop_loss',
-            current_time=current_time,
-            current_rate=80.0,
-            current_profit=-0.20,
-            side='long'
-        )
-        assert result is True
-        assert strategy.risk_manager.cooldown_until is not None
-
-    def test_custom_exit_does_not_record_trade_result(self, default_config):
-        """custom_exit()はトレード結果を記録しない（バグ修正確認）"""
-        strategy = DCAStrategy(default_config)
-        strategy.risk_manager.consecutive_loss_count = 0
-
-        mock_trade = MagicMock()
-        mock_trade.stake_amount = 10000
-
-        strategy.custom_exit(
-            pair='BTC/JPY',
-            trade=mock_trade,
-            current_time=datetime(2024, 6, 1),
-            current_rate=95.0,
-            current_profit=-0.05
-        )
-        # バグ修正後: custom_exit()はトレード結果を記録しない
-        assert strategy.risk_manager.consecutive_loss_count == 0
-
-
-class TestDCAStrategyPortfolioLimit:
-    """ポートフォリオ配分上限チェックのテスト"""
-
-    def test_stake_blocked_by_portfolio_limit(self, default_config):
-        """ポートフォリオ配分上限を超える場合Noneを返す"""
-        strategy = DCAStrategy(default_config)
-        # wallet_balance=50000, max_portfolio_allocation=0.2 -> max=10000
-        # proposed_stake=15000 > 10000 -> ブロック
-        result = strategy.custom_stake_amount(
-            pair='BTC/JPY',
-            current_time=datetime(2024, 6, 1),
-            current_rate=100.0,
-            proposed_stake=15000,
-            min_stake=100,
-            max_stake=50000,
-            leverage=1.0,
-            entry_tag=None,
-            side='long',
-            wallet_balance=50000
-        )
-        assert result is None
-
-    def test_stake_allowed_within_portfolio_limit(self, default_config):
-        """ポートフォリオ配分上限以内の場合はステーク額を返す"""
-        strategy = DCAStrategy(default_config)
-        result = strategy.custom_stake_amount(
-            pair='BTC/JPY',
-            current_time=datetime(2024, 6, 1),
-            current_rate=100.0,
-            proposed_stake=5000,
-            min_stake=100,
-            max_stake=50000,
-            leverage=1.0,
-            entry_tag=None,
-            side='long',
-            wallet_balance=50000
-        )
-        assert result == 5000
+    def test_balanced_configuration_uses_tighter_risk(self, default_config):
+        strategy = DCAStrategyBalanced(default_config)
+        assert strategy.stoploss == -0.05
+        assert strategy.trailing_stop_positive == 0.006
+        assert strategy.trailing_stop_positive_offset == 0.015

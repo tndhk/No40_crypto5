@@ -15,32 +15,38 @@ from typing import Optional
 from freqtrade.persistence import Trade
 from pandas import DataFrame
 
-from dca_strategy import DCAStrategy
+try:
+    from dca_strategy import DCAStrategy
+except ModuleNotFoundError:
+    from .dca_strategy import DCAStrategy
 
 
 class DCAStrategyBalanced(DCAStrategy):
     """Lower-risk profile for Dry Run recovery."""
 
     minimal_roi = {
-        "0": 0.035,
-        "120": 0.018,
-        "360": 0.008,
+        "0": 0.025,
+        "90": 0.012,
+        "240": 0.005,
     }
-    stoploss = -0.08
+    stoploss = -0.05
 
-    trailing_stop_positive = 0.008
-    trailing_stop_positive_offset = 0.02
+    trailing_stop_positive = 0.006
+    trailing_stop_positive_offset = 0.015
 
-    max_entry_position_adjustment = 2
+    max_entry_position_adjustment = 0
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe["enter_long"] = 0
 
         dataframe.loc[
-            (dataframe["rsi"] <= 45)
-            & (dataframe["volume"] > 0.9 * dataframe["volume_sma_20"])
-            & (dataframe["ema_50"] >= dataframe["ema_200"])
-            & (dataframe["adx"] >= 18),
+            (dataframe["rsi"] <= 42)
+            & (dataframe["volume"] >= dataframe["volume_sma_20"])
+            & (dataframe["ema_50"] > dataframe["ema_200"])
+            & (dataframe["adx"] >= 20)
+            & (dataframe["close"] > dataframe["open"])
+            & (dataframe["close"] > dataframe["close"].shift(1))
+            & (dataframe["volatility_ratio"] <= self.custom_info["volatility_threshold"]),
             "enter_long",
         ] = 1
 
@@ -54,8 +60,8 @@ class DCAStrategyBalanced(DCAStrategy):
         dataframe["exit_long"] = 0
 
         dataframe.loc[
-            (dataframe["rsi"] >= 64)
-            | ((dataframe["rsi"] >= 58) & (dataframe["close"] < dataframe["ema_50"])),
+            (dataframe["rsi"] >= 62)
+            | ((dataframe["rsi"] >= 56) & (dataframe["close"] < dataframe["ema_50"])),
             "exit_long",
         ] = 1
 
@@ -76,29 +82,4 @@ class DCAStrategyBalanced(DCAStrategy):
         side: str = "long",
         **kwargs,
     ) -> Optional[float]:
-        adjustment = super().adjust_trade_position(
-            trade=trade,
-            current_time=current_time,
-            current_rate=current_rate,
-            current_profit=current_profit,
-            min_stake=min_stake,
-            max_stake=max_stake,
-            current_entry_rate=current_entry_rate,
-            current_exit_rate=current_exit_rate,
-            current_entry_profit=current_entry_profit,
-            current_exit_profit=current_exit_profit,
-            side=side,
-            **kwargs,
-        )
-        if adjustment is None or adjustment <= 0:
-            return adjustment
-
-        current_stake = getattr(trade, "stake_amount", 0.0) if trade else 0.0
-
-        dca_cap = max(current_stake * 0.35, 0.0)
-        if max_stake:
-            dca_cap = min(dca_cap, max_stake * 0.2)
-
-        if dca_cap <= 0:
-            return None
-        return min(adjustment, dca_cap)
+        return None
