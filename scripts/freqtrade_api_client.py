@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 import requests
 
@@ -52,12 +53,52 @@ class ApiResponse:
     status_code: int
 
 
+def _load_dotenv_candidates() -> dict[str, str]:
+    """Load simple KEY=VALUE pairs from nearby .env files.
+
+    Keeps parsing intentionally minimal to avoid adding a dependency.
+    Existing process environment values should still win later.
+    """
+    candidates = [Path.cwd() / ".env", Path(__file__).resolve().parent.parent / ".env"]
+    values: dict[str, str] = {}
+
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            for raw_line in path.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in values:
+                    values[key] = value
+        except OSError:
+            continue
+
+    return values
+
+
+
+def _first_nonempty(env_vars: dict[str, str], *keys: str, default: str) -> str:
+    """Return the first non-empty environment variable value."""
+    for key in keys:
+        value = str(env_vars.get(key, "")).strip()
+        if value:
+            return value
+    return default
+
+
+
 def load_api_config_from_env(env_vars: dict | None = None) -> ApiClientConfig:
     """Load API client configuration from environment variables.
 
-    Reads FT_API_URL, FT_API_USERNAME, and FT_API_PASSWORD from the
-    provided env_vars dict (or os.environ if None). Falls back to
-    default values for any missing keys.
+    Preferred variables are ``FT_API_URL``, ``FT_API_USERNAME``, and
+    ``FT_API_PASSWORD``. For repository-local operations, also accept the
+    Freqtrade-style config variables so diagnostics can target the active
+    dry-run bot without requiring duplicate env entries.
 
     Args:
         env_vars: Dictionary of environment variables. Uses os.environ if None.
@@ -67,12 +108,40 @@ def load_api_config_from_env(env_vars: dict | None = None) -> ApiClientConfig:
 
     """
     if env_vars is None:
-        env_vars = os.environ
+        env_vars = {**_load_dotenv_candidates(), **os.environ}
+    elif not isinstance(env_vars, dict):
+        env_vars = dict(env_vars)
+
+    listen_ip = _first_nonempty(
+        env_vars,
+        "FREQTRADE__API_SERVER__LISTEN_IP_ADDRESS",
+        default="127.0.0.1",
+    )
+    if listen_ip == "0.0.0.0":
+        listen_ip = "127.0.0.1"
+
+    listen_port = _first_nonempty(
+        env_vars,
+        "FREQTRADE__API_SERVER__LISTEN_PORT",
+        default="8081",
+    )
+
+    default_base_url = f"http://{listen_ip}:{listen_port}"
 
     return ApiClientConfig(
-        base_url=env_vars.get("FT_API_URL", "http://127.0.0.1:8081"),
-        username=env_vars.get("FT_API_USERNAME", "freqtrader"),
-        password=env_vars.get("FT_API_PASSWORD", ""),
+        base_url=_first_nonempty(env_vars, "FT_API_URL", default=default_base_url),
+        username=_first_nonempty(
+            env_vars,
+            "FT_API_USERNAME",
+            "FREQTRADE__API_SERVER__USERNAME",
+            default="freqtrader",
+        ),
+        password=_first_nonempty(
+            env_vars,
+            "FT_API_PASSWORD",
+            "FREQTRADE__API_SERVER__PASSWORD",
+            default="",
+        ),
     )
 
 
