@@ -41,9 +41,7 @@
             "BTC/USDT",
             "ETH/USDT",
             "SOL/USDT",
-            "XRP/USDT",
-            "DOGE/USDT",
-            "ADA/USDT"
+            "XRP/USDT"
         ],
         "pair_blacklist": [
             "BNB/.*"
