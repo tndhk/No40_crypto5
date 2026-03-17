@@ -361,9 +361,6 @@ class DCAStrategy(IStrategy):
         time_in_force: str,
         exit_reason: str,
         current_time: datetime,
-        current_rate: float,
-        current_profit: float,
-        side: str,
         **kwargs
     ) -> bool:
         """
@@ -378,14 +375,19 @@ class DCAStrategy(IStrategy):
             time_in_force: 注文有効期限
             exit_reason: エグジット理由
             current_time: 現在時刻
-            current_rate: 現在のレート
-            current_profit: 現在の利益率
-            side: 'long' or 'short'
             **kwargs: その他のパラメータ
 
         Returns:
             True: 注文許可, False: 注文拒否
         """
+        current_rate = kwargs.get('current_rate', rate)
+        current_profit = kwargs.get('current_profit')
+        if current_profit is None:
+            try:
+                current_profit = trade.calc_profit_ratio(current_rate)
+            except Exception:
+                current_profit = 0.0
+
         # トレード結果を記録
         is_loss = current_profit < 0
         self.risk_manager.record_trade_result(is_loss)

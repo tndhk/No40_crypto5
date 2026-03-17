@@ -274,6 +274,29 @@ class TestDCAStrategyRiskManagement:
         assert strategy.risk_manager.get_daily_loss(now) == pytest.approx(3.0)
         assert strategy.risk_manager.check_cooldown(now) is False
 
+    def test_confirm_trade_exit_is_compatible_with_new_freqtrade_signature(self, default_config):
+        strategy = DCAStrategy(default_config)
+        trade = MagicMock()
+        trade.stake_amount = 100.0
+        trade.calc_profit_ratio.return_value = -0.02
+
+        now = datetime.now()
+        result = strategy.confirm_trade_exit(
+            pair='BTC/USDT',
+            trade=trade,
+            order_type='limit',
+            amount=1.0,
+            rate=98.0,
+            time_in_force='GTC',
+            exit_reason='exit_signal',
+            current_time=now,
+            wallet_balance=980.0,
+        )
+
+        assert result is True
+        trade.calc_profit_ratio.assert_called_once_with(98.0)
+        assert strategy.risk_manager.get_daily_loss(now) == pytest.approx(2.0)
+
 
 class TestDCAStrategyBasicConfiguration:
     """基本設定のテスト"""
